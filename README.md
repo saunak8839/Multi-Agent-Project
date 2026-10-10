@@ -19,10 +19,15 @@ Retrieve  PostgreSQL  Simulated logs
           ↓
        Draft reply
           ↓
-         END
+       QA reviewer
+       ↙        ↘
+     FAIL       PASS
+      ↓           ↓
+  Specialist     END
+      (retry)
 ```
 
-LangGraph passes a shared state through nodes. Intake adds the intent, urgency, and extracted entities. A conditional edge selects FAQ, Billing, or Technical. Specialists add findings, and Draft turns those findings into a response.
+LangGraph passes a shared state through nodes. Intake adds the intent, urgency, and extracted entities. A conditional edge selects FAQ, Billing, or Technical. Specialists add findings, Draft turns those findings into a response, and QA decides whether to accept it or return feedback to the same specialist.
 
 ## Iteration 2: Tool calling
 
@@ -35,6 +40,12 @@ Billing tools read seeded orders and payment attempts from PostgreSQL. The Techn
 Markdown documents in `data/knowledge_base/` are split into overlapping chunks, embedded with OpenAI's `text-embedding-3-small`, and stored in PostgreSQL with pgvector. For an FAQ question, the agent embeds the query, retrieves the closest chunks by cosine distance, and gives those excerpts to the model. The model is instructed to answer only from the retrieved text. If no chunk is sufficiently relevant, the agent abstains. Answers include references in the form `[source-file.md#chunk-001]`.
 
 The ingester replaces chunks for a document when it is rerun. Run it again after adding or editing knowledge-base Markdown files.
+
+## Iteration 4: QA and feedback loops
+
+After each draft, a structured QA reviewer checks grounding, factual consistency with specialist evidence, completeness, tone, and FAQ citations. A passing response goes to the end of the graph. A failed response sends actionable feedback to the same specialist, which runs again before a fresh draft and review.
+
+The workflow allows three QA attempts (the first review plus up to two retries). If the draft still fails, the graph replaces it with a safe handoff response rather than returning a repeatedly rejected draft. The command-line output shows the review status, issues, and attempt count.
 
 ## Set up and run
 
@@ -57,7 +68,7 @@ python -m app.main "My router internet connection is down"
 
 Order `12345` has two successful seeded payment records; order `12346` has one. The knowledge base contains sample billing/refund, shipping, and technical guidance. These are demo policies for this project, not real company policies.
 
-`DATABASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` are configured in `.env.example`. Billing and Technical require the model API key; Billing also requires PostgreSQL. FAQ requires PostgreSQL, ingested documents, and the OpenAI API key for embeddings and answer generation.
+`DATABASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` are configured in `.env.example`. All routes use the OpenAI API for QA review; Billing and Technical also use it for specialist work. Billing requires PostgreSQL, and FAQ requires PostgreSQL plus ingested documents for retrieval and embeddings.
 
 ## State and code map
 
@@ -65,7 +76,7 @@ The shared state carries the original message, intake classification and entitie
 
 ```text
 app/
-├── agents/       # Intake, specialist, tool-call, and draft nodes
+├── agents/       # Intake, specialists, draft, and QA reviewer nodes
 ├── graph/        # State schema, routing, graph construction
 ├── models/       # PostgreSQL access layer
 ├── rag/          # Chunking, embeddings, ingestion, retrieval
@@ -78,4 +89,4 @@ data/
 
 ## Next iterations
 
-Planned work includes quality review with a feedback loop, escalation to a human, and approval before risky actions such as refunds. These are not implemented yet.
+Planned work includes escalation to a human and approval before risky actions such as refunds. These are not implemented yet.

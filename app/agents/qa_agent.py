@@ -1,0 +1,100 @@
+"""Review drafted replies for grounding, correctness, tone, and citations."""
+
+import os
+import re
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
+
+from app.graph.state import SupportState
+
+
+MAX_QA_ATTEMPTS = 3
+
+
+class QAReview(BaseModel):
+    passed: bool = Field(description="Whether the draft is safe, grounded, and ready to send")
+    issues: list[str] = Field(description="Specific problems that must be fixed; empty when passed")
+    feedback: str = Field(description="Concise, actionable directions for improving a failed draft")
+
+
+def qa_reviewer_agent(state: SupportState) -> dict:
+    attempt = state.get("qa_attempts", 0) + 1
+    model = ChatOpenAI(
+        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        temperature=0,
+    ).with_structured_output(QAReview)
+    evidence = {
+        "specialist": state.get("specialist"),
+        "specialist_findings": state.get("findings", ""),
+        "retrieved_knowledge_chunks": state.get("retrieved_context", []),
+        "tool_calls": state.get("tool_calls", []),
+    }
+    review = model.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "You are a strict customer-support quality reviewer. Check that every factual claim in "
+                    "the draft is supported by specialist findings or retrieved knowledge, that the reply "
+                    "answers the customer's request, follows the evidence and policy, and has an appropriate "
+                    "professional tone. For FAQ replies, require a citation that exactly matches a retrieved "
+                    "source chunk. Fail drafts with unsupported promises, invented actions, missing required "
+                    "citations, or material factual errors. Pass only when there are no material issues. "
+                    "When failing, give concise, actionable feedback for the specialist to address."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Customer message:\n{state['customer_message']}\n\n"
+                    f"Evidence:\n{evidence}\n\nDraft reply:\n{state.get('draft_reply', '')}"
+                )
+            ),
+        ]
+    )
+
+    issues = list(review.issues)
+    if state.get("specialist") == "faq" and state.get("retrieved_context"):
+        valid_citations = {
+            f"[{chunk['source']}#chunk-{chunk['chunk_index']:03d}]"
+            for chunk in state["retrieved_context"]
+        }
+        draft_citations = set(re.findall(r"\[[^\]\n]+#chunk-\d{3}\]", state.get("draft_reply", "")))
+        if not draft_citations or not draft_citations.intersection(valid_citations):
+            issues.append("Add a citation that exactly matches a retrieved knowledge source chunk.")
+        elif not draft_citations.issubset(valid_citations):
+            issues.append("Remove citations that do not match a retrieved knowledge source chunk.")
+
+    passed = review.passed and not issues
+    if not passed and not issues:
+        issues.append("Reviewer requested a revision; see the feedback below.")
+    feedback = review.feedback.strip()
+    if issues and not feedback:
+        feedback = "Fix the QA issues: " + "; ".join(issues)
+
+    result = {
+        "passed": passed,
+        "issues": issues,
+        "feedback": feedback,
+        "attempt": attempt,
+    }
+    return {
+        "qa_result": result,
+        "qa_feedback": "" if passed else feedback,
+        "qa_attempts": attempt,
+        "steps": [
+            f"qa reviewer: {'passed' if passed else 'failed'} on attempt {attempt}"
+            + (f" ({len(issues)} issue(s))" if issues else "")
+        ],
+    }
+
+
+def qa_fallback(state: SupportState) -> dict:
+    """Replace a repeatedly rejected draft with a safe holding response."""
+    return {
+        "draft_reply": (
+            "Thanks for contacting support. I couldn't verify an answer that meets our quality checks, "
+            "so I’m passing your request to a support specialist for review."
+        ),
+        "steps": ["qa fallback: retry limit reached; replaced draft with safe handoff response"],
+    }

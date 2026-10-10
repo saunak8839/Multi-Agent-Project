@@ -31,7 +31,11 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
         HumanMessage(
             content=(
                 f"Customer message: {state['customer_message']}\n"
-                f"Intake entities: {state.get('entities', {})}. Do not guess missing identifiers."
+                f"Intake entities: {state.get('entities', {})}. Do not guess missing identifiers.\n"
+                + (
+                    f"QA reviewer feedback to address on this retry: {state['qa_feedback']}"
+                    if state.get("qa_feedback") else ""
+                )
             )
         ),
     ]

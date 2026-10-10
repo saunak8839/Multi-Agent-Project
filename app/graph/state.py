@@ -13,6 +13,9 @@ class SupportState(TypedDict, total=False):
     findings: str
     retrieved_context: list[dict[str, Any]]
     draft_reply: str
+    qa_result: dict[str, Any]
+    qa_feedback: str
+    qa_attempts: int
     tool_calls: Annotated[list[str], operator.add]
     # LangGraph combines each node's step entry with the existing list.
     steps: Annotated[list[str], operator.add]

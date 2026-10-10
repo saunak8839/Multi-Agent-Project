@@ -9,7 +9,7 @@ from app.graph.workflow import support_graph
 
 def main() -> None:
     load_dotenv()
-    parser = argparse.ArgumentParser(description="Run the basic support desk graph")
+    parser = argparse.ArgumentParser(description="Run the support desk graph")
     parser.add_argument("message", help="Customer message to triage")
     args = parser.parse_args()
 
@@ -21,7 +21,12 @@ def main() -> None:
         print(f"  - {step}")
     if result.get("tool_calls"):
         print(f"Tools called: {', '.join(result['tool_calls'])}")
-    print(f"\nDraft reply: {result['draft_reply']}")
+    if result.get("qa_result"):
+        status = "passed" if result["qa_result"].get("passed") else "failed"
+        print(f"QA: {status} after {result.get('qa_attempts', 0)} attempt(s)")
+        if result["qa_result"].get("issues"):
+            print(f"QA issues: {'; '.join(result['qa_result']['issues'])}")
+    print(f"\nFinal reply: {result['draft_reply']}")
 
 
 if __name__ == "__main__":
