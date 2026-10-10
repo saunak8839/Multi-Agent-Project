@@ -1,60 +1,85 @@
 # Multi-Agent Support Desk
 
-A graph-based customer support system that triages incoming messages, sends them to a focused specialist, and drafts a response. The project is being built in iterations to make the workflow architecture easy to understand and extend.
+A graph-based customer support system that triages incoming messages, routes them to focused specialists, and drafts replies. The project is built in iterations to make agent workflows and their boundaries clear.
 
 ## Architecture
 
 ```text
 Customer message
       ↓
-Intake agent — classify intent, detect urgency, extract entities
+Intake — classify intent, detect urgency, extract entities
       ↓
 Conditional router
    ┌──┼───────────┐
    ↓  ↓           ↓
  FAQ Billing   Technical
-   └──┼───────────┘
-      ↓
-Draft reply
-      ↓
-     END
+       ↓           ↓
+       └─── Draft ─┘
+             ↓
+            END
 ```
 
-The workflow is implemented with LangGraph. Each node reads the shared workflow state and returns updates. A conditional edge uses the intent identified by intake to select the specialist. Specialist output is passed to the draft node, which produces a customer-facing reply.
+LangGraph passes a shared state through nodes. Intake adds the intent, urgency, and extracted entities. A conditional edge selects FAQ, Billing, or Technical. The selected specialist adds findings, and Draft turns those findings into a response.
 
-The broader project design can grow to include an FAQ knowledge base (RAG), controlled billing and diagnostic tools, escalation to a human, quality review with a feedback loop, and approval before risky actions such as refunds. Those capabilities are planned; they are not part of the current basic graph.
+## Iteration 2: Tool calling
 
-## Current implementation
-
-Iteration 1 provides deterministic keyword-based triage and FAQ, billing, and technical specialist placeholders. It runs without model credentials or external services. Billing and technical nodes do not access real customer systems, and the FAQ node does not yet retrieve documents.
-
-The shared state currently carries:
-
-- The original customer message
-- Classified intent, urgency, and extracted entities
-- Selected specialist and its findings
-- Draft reply and a list of workflow steps
-
-## Project structure
+Billing and Technical are now tool-using LLM specialists. The model receives descriptions and argument schemas for only its permitted tools. It can request a call; application code dispatches that request to a Python function, adds the result to the model conversation, and lets the specialist continue. A bounded loop limits tool-call rounds.
 
 ```text
-app/
-├── agents/       # Intake, specialist, and draft nodes
-├── graph/        # State schema, routing, graph construction
-└── main.py       # Command-line entry point
-data/             # Knowledge base and seed data (future use)
-scripts/          # Utility scripts (future use)
-tests/            # Test suite (future use)
-requirements.txt  # Python dependencies
+Billing model ──requests──> get_order / get_payments
+                                  ↓
+                         Python tool function
+                                  ↓
+                              PostgreSQL
+                                  ↓
+Billing model <──tool result─────┘
+
+Technical model ──requests──> search_technical_logs
+                                      ↓
+                              Python tool function
+                                      ↓
+                             Simulated log data
 ```
 
-## Run the current workflow
+The Billing tools are read-only and can look up seeded orders and payment attempts. The Technical tool searches simulated log records in `data/seed/technical_logs.json`. No refund, account change, or other side-effect tool is exposed.
+
+## Set up and run
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m app.main "I was charged twice for order 12345"
+cp .env.example .env
 ```
 
-Try a general question or a technical issue to see the conditional router choose a different specialist.
+Add an OpenAI API key to `.env`, then start PostgreSQL. The first database startup loads the schema and seed rows from `data/seed/001_seed.sql`.
+
+```bash
+docker compose up -d postgres
+python -m app.main "I was charged twice for order 12345"
+python -m app.main "My router internet connection is down"
+```
+
+Order `12345` has two successful seeded payment records to inspect. Order `12346` has one. The technical log seed includes router connectivity, login, and checkout examples. FAQ messages still use a deterministic placeholder and do not require an LLM call.
+
+`DATABASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` are configured in `.env.example`. Billing and Technical require the model API key; Billing also requires the local PostgreSQL service.
+
+## State and code map
+
+The shared state carries the original message, intake classification and entities, selected specialist, findings, tool-call names, draft reply, and a step trace. Nodes return partial updates; LangGraph merges them into the state.
+
+```text
+app/
+├── agents/       # Intake, specialist tool-call loop, and draft nodes
+├── graph/        # State schema, routing, graph construction
+├── models/       # PostgreSQL access layer
+├── tools/        # Read-only billing and simulated log tools
+└── main.py       # Command-line entry point
+data/seed/        # PostgreSQL seed SQL and simulated technical logs
+docker-compose.yml
+requirements.txt
+```
+
+## Next iterations
+
+Planned work includes FAQ retrieval (RAG), escalation to a human, quality review with a feedback loop, and approval before risky actions such as refunds. These are not implemented yet.

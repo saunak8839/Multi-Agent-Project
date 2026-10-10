@@ -12,5 +12,6 @@ class SupportState(TypedDict, total=False):
     specialist: str
     findings: str
     draft_reply: str
+    tool_calls: Annotated[list[str], operator.add]
     # LangGraph combines each node's step entry with the existing list.
     steps: Annotated[list[str], operator.add]

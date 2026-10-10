@@ -1,11 +1,14 @@
-"""Run the Iteration 1 support workflow from the command line."""
+"""Run the support workflow from the command line."""
 
 import argparse
+
+from dotenv import load_dotenv
 
 from app.graph.workflow import support_graph
 
 
 def main() -> None:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Run the basic support desk graph")
     parser.add_argument("message", help="Customer message to triage")
     args = parser.parse_args()
@@ -16,6 +19,8 @@ def main() -> None:
     print("Path:")
     for step in result["steps"]:
         print(f"  - {step}")
+    if result.get("tool_calls"):
+        print(f"Tools called: {', '.join(result['tool_calls'])}")
     print(f"\nDraft reply: {result['draft_reply']}")
 
 

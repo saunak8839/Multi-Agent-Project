@@ -1,0 +1,38 @@
+[
+  {
+    "timestamp": "2026-09-18T09:14:22Z",
+    "service": "home-router",
+    "device_id": "router-01",
+    "level": "ERROR",
+    "code": "WAN_DHCP_TIMEOUT",
+    "message": "Router did not receive a WAN address after DHCP renewal; reconnect attempt scheduled.",
+    "keywords": ["internet", "router", "connection", "dhcp", "offline"]
+  },
+  {
+    "timestamp": "2026-09-18T09:16:03Z",
+    "service": "home-router",
+    "device_id": "router-01",
+    "level": "INFO",
+    "code": "WAN_RECONNECTED",
+    "message": "WAN connection restored after lease renewal.",
+    "keywords": ["internet", "router", "connection", "reconnected"]
+  },
+  {
+    "timestamp": "2026-09-19T13:41:10Z",
+    "service": "account-login",
+    "device_id": "web-client",
+    "level": "ERROR",
+    "code": "AUTH_TOKEN_EXPIRED",
+    "message": "Login request rejected because the session token expired.",
+    "keywords": ["login", "sign-in", "authentication", "token", "session"]
+  },
+  {
+    "timestamp": "2026-09-20T16:05:47Z",
+    "service": "checkout-api",
+    "device_id": "web-client",
+    "level": "ERROR",
+    "code": "CHECKOUT_502",
+    "message": "Checkout gateway returned HTTP 502 while processing a cart.",
+    "keywords": ["checkout", "error", "502", "cart", "payment"]
+  }
+]
