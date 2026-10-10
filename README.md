@@ -13,35 +13,28 @@ Conditional router
    ┌──┼───────────┐
    ↓  ↓           ↓
  FAQ Billing   Technical
-       ↓           ↓
-       └─── Draft ─┘
-             ↓
-            END
+   ↓     ↓          ↓
+Retrieve  PostgreSQL  Simulated logs
+   └──────┼──────────┘
+          ↓
+       Draft reply
+          ↓
+         END
 ```
 
-LangGraph passes a shared state through nodes. Intake adds the intent, urgency, and extracted entities. A conditional edge selects FAQ, Billing, or Technical. The selected specialist adds findings, and Draft turns those findings into a response.
+LangGraph passes a shared state through nodes. Intake adds the intent, urgency, and extracted entities. A conditional edge selects FAQ, Billing, or Technical. Specialists add findings, and Draft turns those findings into a response.
 
 ## Iteration 2: Tool calling
 
-Billing and Technical are now tool-using LLM specialists. The model receives descriptions and argument schemas for only its permitted tools. It can request a call; application code dispatches that request to a Python function, adds the result to the model conversation, and lets the specialist continue. A bounded loop limits tool-call rounds.
+Billing and Technical are LLM specialists with access to allowlisted Python tools. The model requests a tool call using its description and argument schema. Application code dispatches the request to the matching function, appends the result to the model conversation, and lets the specialist continue. A bounded loop limits tool-call rounds.
 
-```text
-Billing model ──requests──> get_order / get_payments
-                                  ↓
-                         Python tool function
-                                  ↓
-                              PostgreSQL
-                                  ↓
-Billing model <──tool result─────┘
+Billing tools read seeded orders and payment attempts from PostgreSQL. The Technical tool searches simulated records in `data/seed/technical_logs.json`. These tools are read-only; no refund or account-change action is available.
 
-Technical model ──requests──> search_technical_logs
-                                      ↓
-                              Python tool function
-                                      ↓
-                             Simulated log data
-```
+## Iteration 3: FAQ RAG
 
-The Billing tools are read-only and can look up seeded orders and payment attempts. The Technical tool searches simulated log records in `data/seed/technical_logs.json`. No refund, account change, or other side-effect tool is exposed.
+Markdown documents in `data/knowledge_base/` are split into overlapping chunks, embedded with OpenAI's `text-embedding-3-small`, and stored in PostgreSQL with pgvector. For an FAQ question, the agent embeds the query, retrieves the closest chunks by cosine distance, and gives those excerpts to the model. The model is instructed to answer only from the retrieved text. If no chunk is sufficiently relevant, the agent abstains. Answers include references in the form `[source-file.md#chunk-001]`.
+
+The ingester replaces chunks for a document when it is rerun. Run it again after adding or editing knowledge-base Markdown files.
 
 ## Set up and run
 
@@ -52,34 +45,37 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Add an OpenAI API key to `.env`, then start PostgreSQL. The first database startup loads the schema and seed rows from `data/seed/001_seed.sql`.
+Add an OpenAI API key to `.env`, then start PostgreSQL with pgvector. The first database startup creates the vector extension and seeds order and payment rows.
 
 ```bash
 docker compose up -d postgres
+python -m app.rag.ingestion
+python -m app.main "What is the return policy?"
 python -m app.main "I was charged twice for order 12345"
 python -m app.main "My router internet connection is down"
 ```
 
-Order `12345` has two successful seeded payment records to inspect. Order `12346` has one. The technical log seed includes router connectivity, login, and checkout examples. FAQ messages still use a deterministic placeholder and do not require an LLM call.
+Order `12345` has two successful seeded payment records; order `12346` has one. The knowledge base contains sample billing/refund, shipping, and technical guidance. These are demo policies for this project, not real company policies.
 
-`DATABASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` are configured in `.env.example`. Billing and Technical require the model API key; Billing also requires the local PostgreSQL service.
+`DATABASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` are configured in `.env.example`. Billing and Technical require the model API key; Billing also requires PostgreSQL. FAQ requires PostgreSQL, ingested documents, and the OpenAI API key for embeddings and answer generation.
 
 ## State and code map
 
-The shared state carries the original message, intake classification and entities, selected specialist, findings, tool-call names, draft reply, and a step trace. Nodes return partial updates; LangGraph merges them into the state.
+The shared state carries the original message, intake classification and entities, selected specialist, findings, retrieved context, tool-call names, draft reply, and a step trace. Nodes return partial updates; LangGraph merges them into the state.
 
 ```text
 app/
-├── agents/       # Intake, specialist tool-call loop, and draft nodes
+├── agents/       # Intake, specialist, tool-call, and draft nodes
 ├── graph/        # State schema, routing, graph construction
 ├── models/       # PostgreSQL access layer
+├── rag/          # Chunking, embeddings, ingestion, retrieval
 ├── tools/        # Read-only billing and simulated log tools
 └── main.py       # Command-line entry point
-data/seed/        # PostgreSQL seed SQL and simulated technical logs
-docker-compose.yml
-requirements.txt
+data/
+├── knowledge_base/ # Source Markdown used by FAQ retrieval
+└── seed/          # PostgreSQL SQL and simulated technical logs
 ```
 
 ## Next iterations
 
-Planned work includes FAQ retrieval (RAG), escalation to a human, quality review with a feedback loop, and approval before risky actions such as refunds. These are not implemented yet.
+Planned work includes quality review with a feedback loop, escalation to a human, and approval before risky actions such as refunds. These are not implemented yet.

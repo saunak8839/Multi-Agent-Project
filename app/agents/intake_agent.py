@@ -9,12 +9,22 @@ def intake_agent(state: SupportState) -> dict:
     message = state["customer_message"]
     text = message.lower()
 
-    billing_terms = ("bill", "billing", "charged", "charge", "payment", "invoice", "refund", "order")
+    billing_terms = (
+        "bill", "billing", "charged", "charge", "payment", "invoice",
+        "duplicate charge", "double charged", "refund me", "refund for",
+        "request a refund", "refund status", "where is my refund",
+    )
+    faq_terms = (
+        "policy", "how do i", "how can i", "what is", "what are",
+        "where can i", "when can i", "shipping", "warranty", "return policy",
+    )
     technical_terms = ("error", "broken", "doesn't work", "does not work", "not working", "can't", "cannot", "internet", "login", "crash")
     if any(term in text for term in billing_terms):
         intent = "billing"
     elif any(term in text for term in technical_terms):
         intent = "technical"
+    elif any(term in text for term in faq_terms):
+        intent = "faq"
     else:
         intent = "faq"
 

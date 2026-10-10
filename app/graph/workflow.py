@@ -1,4 +1,4 @@
-"""Build and compile the Iteration 1 support graph."""
+"""Build and compile the support desk graph."""
 
 from langgraph.graph import END, START, StateGraph
 
