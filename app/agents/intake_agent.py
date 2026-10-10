@@ -36,5 +36,13 @@ def intake_agent(state: SupportState) -> dict:
         "intent": intent,
         "entities": entities,
         "urgency": urgency,
+        # Never trust action or approval fields supplied with the initial
+        # customer input; only downstream graph nodes may populate them.
+        "proposed_action": {},
+        "requires_approval": False,
+        "approval_decision": {},
+        "qa_result": {},
+        "qa_feedback": "",
+        "qa_attempts": 0,
         "steps": [f"intake: intent={intent}, urgency={urgency}, entities={entities}"],
     }

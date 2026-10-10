@@ -1,5 +1,6 @@
 """Shared LLM tool-calling loop used by specialist nodes."""
 
+import json
 import os
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -23,9 +24,15 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
         SystemMessage(
             content=(
                 f"You are the {specialist} specialist in a customer support desk. "
-                "Use the provided read-only tools when they can verify facts. Never claim a lookup succeeded "
-                "unless you called the tool and saw its result. Do not invent records, promise refunds, "
-                "or perform actions. Summarize the verified results and any missing information concisely."
+                "Use only the tools provided to you. Treat lookup tools as read-only. Never claim a lookup "
+                "succeeded unless you called the tool and saw its result. Do not invent records, promise "
+                "refunds, or execute side effects. Summarize verified results and missing information. "
+                + (
+                    "Only if the customer requests a refund and tool results verify an excess successful "
+                    "payment, use propose_refund for the verified excess in cents. This records a proposal "
+                    "for human approval and does not issue money. State clearly that it is awaiting approval. "
+                    if specialist == "billing" else ""
+                )
             )
         ),
         HumanMessage(
@@ -41,6 +48,7 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
     ]
     tool_by_name = {tool.name: tool for tool in tools}
     called_tools: list[str] = []
+    proposed_action = state.get("proposed_action")
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = model.invoke(messages)
@@ -50,6 +58,8 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
                 "specialist": specialist,
                 "findings": str(response.content),
                 "tool_calls": called_tools,
+                "proposed_action": proposed_action,
+                "requires_approval": bool(proposed_action),
                 "steps": [f"{specialist} specialist: completed after {len(called_tools)} tool call(s)"],
             }
 
@@ -60,6 +70,10 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
             else:
                 result = selected_tool.invoke(tool_call["args"])
                 called_tools.append(tool_call["name"])
+                if tool_call["name"] == "propose_refund":
+                    proposal = json.loads(str(result))
+                    if proposal.get("status") == "proposed":
+                        proposed_action = proposal
             messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
 
     raise RuntimeError(f"{specialist} specialist exceeded the {MAX_TOOL_ROUNDS}-round tool-call limit.")

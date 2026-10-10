@@ -14,8 +14,14 @@ def route_to_specialist(state: SupportState) -> str:
 def route_after_qa(state: SupportState) -> str:
     review = state.get("qa_result", {})
     if review.get("passed"):
-        return "pass"
+        return "approval" if state.get("requires_approval") else "pass"
     if state.get("qa_attempts", 0) >= MAX_QA_ATTEMPTS:
         return "fallback"
     specialist = state.get("specialist", "faq")
     return specialist if specialist in {"faq", "billing", "technical"} else "fallback"
+
+
+def route_after_approval(state: SupportState) -> str:
+    if state.get("approval_decision", {}).get("approved") is True:
+        return "execute"
+    return "escalate"

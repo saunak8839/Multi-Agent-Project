@@ -20,11 +20,20 @@ Retrieve  PostgreSQL  Simulated logs
        Draft reply
           ↓
        QA reviewer
-       ↙        ↘
-     FAIL       PASS
-      ↓           ↓
-  Specialist     END
-      (retry)
+       ↙       ↘
+     FAIL      PASS
+      ↓          ↓
+  Specialist   Risky action?
+      (retry)    ↙       ↘
+              yes         no
+               ↓           ↓
+          Approval gate   END
+           ↙       ↘
+       Approve    Reject
+          ↓          ↓
+        Execute   Escalate
+          ↓          ↓
+          END        END
 ```
 
 LangGraph passes a shared state through nodes. Intake adds the intent, urgency, and extracted entities. A conditional edge selects FAQ, Billing, or Technical. Specialists add findings, Draft turns those findings into a response, and QA decides whether to accept it or return feedback to the same specialist.
@@ -33,7 +42,7 @@ LangGraph passes a shared state through nodes. Intake adds the intent, urgency, 
 
 Billing and Technical are LLM specialists with access to allowlisted Python tools. The model requests a tool call using its description and argument schema. Application code dispatches the request to the matching function, appends the result to the model conversation, and lets the specialist continue. A bounded loop limits tool-call rounds.
 
-Billing tools read seeded orders and payment attempts from PostgreSQL. The Technical tool searches simulated records in `data/seed/technical_logs.json`. These tools are read-only; no refund or account-change action is available.
+Billing tools read seeded orders and payment attempts from PostgreSQL. A verified duplicate charge can produce a refund proposal, but proposing does not issue money. The Technical tool searches simulated records in `data/seed/technical_logs.json`.
 
 ## Iteration 3: FAQ RAG
 
@@ -46,6 +55,12 @@ The ingester replaces chunks for a document when it is rerun. Run it again after
 After each draft, a structured QA reviewer checks grounding, factual consistency with specialist evidence, completeness, tone, and FAQ citations. A passing response goes to the end of the graph. A failed response sends actionable feedback to the same specialist, which runs again before a fresh draft and review.
 
 The workflow allows three QA attempts (the first review plus up to two retries). If the draft still fails, the graph replaces it with a safe handoff response rather than returning a repeatedly rejected draft. The command-line output shows the review status, issues, and attempt count.
+
+## Iteration 5: Approval gate
+
+If Billing proposes a refund, QA must pass before the graph interrupts and shows the order, amount, and reviewed draft. The CLI asks a human to approve or reject. Approval rechecks the duplicate-payment capacity and records the refund in the local demo refund ledger. Rejection records an escalation summary and executes no refund.
+
+This demo uses LangGraph's in-memory checkpointer and keeps the CLI process open while waiting for the decision. The pending approval is lost if that process exits; a deployed service should use a durable checkpointer. The refund ledger is simulated and does not contact a payment processor.
 
 ## Set up and run
 
@@ -62,7 +77,7 @@ Add an OpenAI API key to `.env`, then start PostgreSQL with pgvector. The first 
 docker compose up -d postgres
 python -m app.rag.ingestion
 python -m app.main "What is the return policy?"
-python -m app.main "I was charged twice for order 12345"
+python -m app.main "I was charged twice for order 12345. Please refund one payment."
 python -m app.main "My router internet connection is down"
 ```
 
@@ -72,21 +87,21 @@ Order `12345` has two successful seeded payment records; order `12346` has one. 
 
 ## State and code map
 
-The shared state carries the original message, intake classification and entities, selected specialist, findings, retrieved context, tool-call names, draft reply, and a step trace. Nodes return partial updates; LangGraph merges them into the state.
+The shared state carries the original message, intake classification and entities, selected specialist, findings, retrieved context, tool-call names, proposed action, QA results, approval decision, draft reply, and a step trace. Nodes return partial updates; LangGraph merges them into the state.
 
 ```text
 app/
-├── agents/       # Intake, specialists, draft, and QA reviewer nodes
+├── agents/       # Intake, specialists, draft, QA, approval, and action nodes
 ├── graph/        # State schema, routing, graph construction
 ├── models/       # PostgreSQL access layer
 ├── rag/          # Chunking, embeddings, ingestion, retrieval
-├── tools/        # Read-only billing and simulated log tools
+├── tools/        # Billing lookups/proposals and simulated log tools
 └── main.py       # Command-line entry point
 data/
 ├── knowledge_base/ # Source Markdown used by FAQ retrieval
 └── seed/          # PostgreSQL SQL and simulated technical logs
 ```
 
-## Next iterations
+## Next iteration
 
-Planned work includes escalation to a human and approval before risky actions such as refunds. These are not implemented yet.
+Further work can connect escalation to a human support system and replace the demo refund ledger with an authorized payment provider integration.
