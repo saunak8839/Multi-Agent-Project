@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from app.graph.state import SupportState
-from app.services.observability import model_usage, record_tool_event
+from app.services.observability import model_usage, record_model_usage_event, record_tool_event
 
 
 MAX_TOOL_ROUNDS = 4
@@ -57,51 +57,59 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
     usage_events: list[dict] = []
     proposed_action = state.get("proposed_action")
 
-    for _ in range(MAX_TOOL_ROUNDS):
-        response = model.invoke(messages)
-        usage_events.append(model_usage(response, os.getenv("OPENAI_MODEL", "gpt-4o-mini")))
-        messages.append(response)
-        if not response.tool_calls:
-            return {
-                "specialist": specialist,
-                "findings": str(response.content),
-                "tool_calls": called_tools,
-                "current_tool_calls": called_tools,
-                "model_usage": usage_events,
-                "proposed_action": proposed_action,
-                "requires_approval": bool(proposed_action),
-                "steps": [f"{specialist} specialist: completed after {len(called_tools)} tool call(s)"],
-            }
+    try:
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = model.invoke(messages)
+            usage_events.append(model_usage(response, os.getenv("OPENAI_MODEL", "gpt-4o-mini")))
+            messages.append(response)
+            if not response.tool_calls:
+                return {
+                    "specialist": specialist,
+                    "findings": str(response.content),
+                    "tool_calls": called_tools,
+                    "current_tool_calls": called_tools,
+                    "model_usage": usage_events,
+                    "proposed_action": proposed_action,
+                    "requires_approval": bool(proposed_action),
+                    "steps": [f"{specialist} specialist: completed after {len(called_tools)} tool call(s)"],
+                }
 
-        for tool_call in response.tool_calls:
-            tool_started = time.perf_counter()
-            selected_tool = tool_by_name.get(tool_call["name"])
-            if selected_tool is None:
-                result = f"Tool {tool_call['name']} is not available to this specialist."
-                record_tool_event(
-                    tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
-                    thread_id=state.get("thread_id", "unknown"), started=tool_started, status="error",
-                    error=ValueError(result),
-                )
-            else:
-                try:
-                    result = selected_tool.invoke(tool_call["args"])
-                except Exception as exc:
+            for tool_call in response.tool_calls:
+                tool_started = time.perf_counter()
+                selected_tool = tool_by_name.get(tool_call["name"])
+                if selected_tool is None:
+                    result = f"Tool {tool_call['name']} is not available to this specialist."
                     record_tool_event(
                         tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
-                        thread_id=state.get("thread_id", "unknown"), started=tool_started,
-                        status="error", error=exc,
+                        thread_id=state.get("thread_id", "unknown"), started=tool_started, status="error",
+                        error=ValueError(result),
                     )
-                    raise
-                record_tool_event(
-                    tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
-                    thread_id=state.get("thread_id", "unknown"), started=tool_started, status="ok",
-                )
-                called_tools.append(tool_call["name"])
-                if tool_call["name"] == "propose_refund":
-                    proposal = json.loads(str(result))
-                    if proposal.get("status") == "proposed":
-                        proposed_action = proposal
-            messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
+                else:
+                    try:
+                        result = selected_tool.invoke(tool_call["args"])
+                    except Exception as exc:
+                        record_tool_event(
+                            tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
+                            thread_id=state.get("thread_id", "unknown"), started=tool_started,
+                            status="error", error=exc,
+                        )
+                        raise
+                    record_tool_event(
+                        tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
+                        thread_id=state.get("thread_id", "unknown"), started=tool_started, status="ok",
+                    )
+                    called_tools.append(tool_call["name"])
+                    if tool_call["name"] == "propose_refund":
+                        proposal = json.loads(str(result))
+                        if proposal.get("status") == "proposed":
+                            proposed_action = proposal
+                messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
 
-    raise RuntimeError(f"{specialist} specialist exceeded the {MAX_TOOL_ROUNDS}-round tool-call limit.")
+        raise RuntimeError(f"{specialist} specialist exceeded the {MAX_TOOL_ROUNDS}-round tool-call limit.")
+    except Exception:
+        for usage in usage_events:
+            record_model_usage_event(
+                model=usage["model"], run_id=state.get("run_id", "unknown"),
+                thread_id=state.get("thread_id", "unknown"), specialist=specialist, usage=usage,
+            )
+        raise

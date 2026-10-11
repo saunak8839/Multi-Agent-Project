@@ -40,6 +40,8 @@ def test_graph_routes_and_traces_end_to_end_without_external_services(
     assert result["specialist"] == expected_specialist
     assert result["qa_result"]["passed"] is True
     assert result["conversation_history"][-1]["role"] == "assistant"
+    assert "node_traces" not in result
+    assert "model_usage" not in result
     assert result["draft_reply"].startswith("Thanks for contacting support.")
     events = [json.loads(line) for line in trace_file.read_text().splitlines()]
     completed_nodes = {event["node"] for event in events if event["event"] == "node"}

@@ -5,6 +5,7 @@ from app.agents.action_agent import escalate_rejected_action, execute_approved_a
 from app.agents.approval_agent import approval_gate
 from app.agents.billing_agent import billing_agent
 from app.agents.draft_agent import draft_agent
+from app.agents.escalation_agent import urgent_escalation_agent
 from app.agents.faq_agent import faq_agent
 from app.agents.intake_agent import intake_agent
 from app.agents.qa_agent import qa_fallback, qa_reviewer_agent
@@ -21,6 +22,7 @@ def build_graph(checkpointer):
     graph.add_node("faq", observe_node("faq", faq_agent))
     graph.add_node("billing", observe_node("billing", billing_agent))
     graph.add_node("technical", observe_node("technical", technical_agent))
+    graph.add_node("escalation", observe_node("escalation", urgent_escalation_agent))
     graph.add_node("draft", observe_node("draft", draft_agent))
     graph.add_node("qa", observe_node("qa", qa_reviewer_agent))
     graph.add_node("qa_fallback", observe_node("qa_fallback", qa_fallback))
@@ -33,9 +35,9 @@ def build_graph(checkpointer):
     graph.add_conditional_edges(
         "intake",
         observe_decision("route_to_specialist", route_to_specialist),
-        {"faq": "faq", "billing": "billing", "technical": "technical"},
+        {"faq": "faq", "billing": "billing", "technical": "technical", "escalation": "escalation"},
     )
-    for specialist in ("faq", "billing", "technical"):
+    for specialist in ("faq", "billing", "technical", "escalation"):
         graph.add_edge(specialist, "draft")
     graph.add_edge("draft", "qa")
     graph.add_conditional_edges(
@@ -47,6 +49,7 @@ def build_graph(checkpointer):
             "faq": "faq",
             "billing": "billing",
             "technical": "technical",
+            "escalation": "escalation",
             "fallback": "qa_fallback",
         },
     )

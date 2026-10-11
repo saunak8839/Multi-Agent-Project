@@ -3,7 +3,7 @@ from pathlib import Path
 
 from app.agents.intake_agent import intake_agent
 from app.graph.routing import route_to_specialist
-from app.services.observability import retrieval_recall_at_k, routing_accuracy
+from app.services.observability import retrieval_mrr_at_k, retrieval_recall_at_k, routing_accuracy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,3 +29,24 @@ def test_retrieval_recall_at_k_handles_expected_source_set():
 
 def test_empty_retrieval_gold_set_is_not_penalized():
     assert retrieval_recall_at_k([], set()) == 1.0
+
+
+def test_chunk_evidence_metric_rewards_early_rank_and_distinguishes_chunks():
+    expected = {"billing_and_refunds.md#chunk-001"}
+    assert retrieval_recall_at_k(["billing_and_refunds.md#chunk-001"], expected) == 1.0
+    assert retrieval_recall_at_k(["billing_and_refunds.md#chunk-000"], expected) == 0.0
+    assert retrieval_mrr_at_k(["other.md#chunk-000", "billing_and_refunds.md#chunk-001"], expected) == 0.5
+
+
+def test_ambiguous_and_high_risk_messages_route_by_topic_or_escalate():
+    examples = {
+        "I can't see my refund yet": "billing",
+        "My wifi keeps dropping": "technical",
+        "URGENT: security breach on my account": "escalation",
+        "I can't sign in after resetting my password": "technical",
+        "My order has not shipped and I see a duplicate charge": "billing",
+        "What is the return policy?": "faq",
+    }
+    for message, expected in examples.items():
+        state = intake_agent({"customer_message": message})
+        assert route_to_specialist(state) == expected

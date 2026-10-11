@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -21,7 +22,7 @@ def _print_history(graph, config: dict) -> None:
         print(f"[{entry.get('created_at', 'unknown time')}] {entry['role']}: {entry['content']}")
 
 
-def _show_result(result: dict, thread_id: str, run_id: str) -> None:
+def _show_result(result: dict, thread_id: str, run_id: str, wall_clock_ms: float) -> None:
     print(f"Conversation ID: {thread_id}")
     print(f"Intent: {result.get('intent', 'unknown')}")
     print(f"Route:  {result.get('specialist', 'unknown')}")
@@ -41,9 +42,10 @@ def _show_result(result: dict, thread_id: str, run_id: str) -> None:
     print(f"\nFinal reply: {result.get('draft_reply', '')}")
     report = summarize_run(load_run_events(run_id), run_id)
     print(
-        f"Trace: {report['events']} events, {report['latency_ms']:.1f} ms summed node/tool/decision time, "
+        f"Trace: {report['events']} events, {report['component_time_ms']:.1f} ms accumulated component time, "
         f"{report['input_tokens']} input + {report['output_tokens']} output tokens"
     )
+    print(f"Current CLI process wall time: {wall_clock_ms:.1f} ms")
     if report["cost_usd"] is not None:
         print(f"Estimated model cost: ${report['cost_usd']:.6f}")
     if report["node_failures"] or report["tool_failures"]:
@@ -88,6 +90,7 @@ def main() -> None:
     thread_id = args.thread_id or uuid.uuid4().hex
     run_id = new_run_id()
     config = {"configurable": {"thread_id": thread_id, "run_id": run_id}}
+    run_started = time.perf_counter()
     with open_support_graph() as support_graph:
         if args.history:
             _print_history(support_graph, config)
@@ -138,7 +141,8 @@ def main() -> None:
             result = _invoke(
                 support_graph, Command(resume={"approved": approved, "note": note}), config, run_id
             )
-        _show_result(result, thread_id, run_id)
+        wall_clock_ms = (time.perf_counter() - run_started) * 1000
+        _show_result(result, thread_id, run_id, wall_clock_ms)
 
 
 if __name__ == "__main__":

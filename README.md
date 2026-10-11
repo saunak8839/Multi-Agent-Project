@@ -10,12 +10,12 @@ Customer message
 Intake — classify intent, detect urgency, extract entities
       ↓
 Conditional router
-   ┌──┼───────────┐
-   ↓  ↓           ↓
- FAQ Billing   Technical
-   ↓     ↓          ↓
+   ┌──┼───────────┬──────────────┐
+   ↓  ↓           ↓              ↓
+ FAQ Billing   Technical   Urgent/security
+   ↓     ↓          ↓        escalation
 Retrieve  PostgreSQL  Simulated logs
-   └──────┼──────────┘
+   └──────┼──────────┴──────────────┘
           ↓
        Draft reply
           ↓
@@ -66,16 +66,17 @@ The graph uses LangGraph's PostgreSQL checkpointer. Each conversation has a `thr
 
 ## Iteration 7: Evaluation and observability
 
-Each graph node, routing decision, and tool call appends a JSON event to `data/observability/traces.jsonl` (or `SUPPORT_TRACE_FILE`). Events include run/thread IDs, status, elapsed milliseconds, failure details, selected route, QA outcome, retrieval sources/distances, tool names, and provider-reported token usage. Customer message and generated reply text are excluded from the trace log. Completed CLI runs show event counts, summed observed latency, token counts, failures, and the trace file location. Set `LLM_INPUT_COST_PER_1M` and `LLM_OUTPUT_COST_PER_1M` to the provider's current USD rates per million tokens to enable cost estimates.
+Each graph node, routing decision, and tool call appends a JSON event to `data/observability/traces.jsonl` (or `SUPPORT_TRACE_FILE`). Events include run/thread IDs, status, elapsed milliseconds, redacted failure details, selected route, QA outcome, retrieval chunks/distances, tool names, and provider-reported token usage. Customer message and generated reply text are excluded from the trace log. Traces stay outside checkpointed conversation state so they do not grow with each follow-up. The CLI reports accumulated component time separately from the current process wall time: component durations overlap when tools run inside nodes. Set `LLM_INPUT_COST_PER_1M` and `LLM_OUTPUT_COST_PER_1M` to the provider's current USD rates per million tokens to enable cost estimates.
 
-The offline tests cover labeled routing, the graph's specialist-to-QA path, and trace/error/token accounting without OpenAI or PostgreSQL. The live evaluation measures labeled routing accuracy and FAQ source recall against the ingested knowledge base:
+The offline tests cover labeled routing, specialist-to-QA paths, approval interruption and resumption, QA retry bounds, tool dispatch, refund idempotency, and trace/error/token accounting without OpenAI or PostgreSQL. The deterministic data evaluation measures route accuracy on a 22-case labeled set. The live retrieval evaluation measures chunk-evidence recall and reciprocal rank (MRR) at four against the ingested knowledge base. Chunk-level labels distinguish retrieval quality even though the corpus has only three source documents:
 
 ```bash
 pytest
+python -m evals.run_evaluation --routing-only
 python -m evals.run_evaluation
 ```
 
-The live retrieval evaluation requires PostgreSQL, ingested FAQ chunks, and OpenAI embedding credentials. Evaluation examples are in `data/evaluation/`; extend them with representative customer messages and the source documents expected for each query.
+The routing score only measures this rule-based classifier against its labeled examples; it does not establish performance on arbitrary customer messages. Retrieval recall measures whether expected evidence chunks occur in the first four results, while MRR rewards a relevant chunk appearing earlier. Evaluation examples are in `data/evaluation/`; add representative and ambiguous cases as routing or corpus behavior changes. The retrieval evaluation requires PostgreSQL, ingested FAQ chunks, and OpenAI embedding credentials. The workflow tests mock model judgments and data access, so they verify application control flow and do not measure real model QA or tool-choice quality.
 
 ## Set up and run
 

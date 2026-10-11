@@ -6,6 +6,8 @@ from app.agents.qa_agent import MAX_QA_ATTEMPTS
 
 def route_to_specialist(state: SupportState) -> str:
     intent = state.get("intent", "faq")
+    if intent == "escalation" or state.get("urgency") == "high":
+        return "escalation"
     if intent in {"billing", "technical"}:
         return intent
     return "faq"
@@ -18,7 +20,7 @@ def route_after_qa(state: SupportState) -> str:
     if state.get("qa_attempts", 0) >= MAX_QA_ATTEMPTS:
         return "fallback"
     specialist = state.get("specialist", "faq")
-    return specialist if specialist in {"faq", "billing", "technical"} else "fallback"
+    return specialist if specialist in {"faq", "billing", "technical", "escalation"} else "fallback"
 
 
 def route_after_approval(state: SupportState) -> str:

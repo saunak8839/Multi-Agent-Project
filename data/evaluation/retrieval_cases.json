@@ -1,5 +1,8 @@
 [
-  {"query": "How do I reset my password?", "expected_sources": ["account_and_technical_help.md"]},
-  {"query": "Why is my refund taking longer?", "expected_sources": ["billing_and_refunds.md"]},
-  {"query": "How long does standard shipping take?", "expected_sources": ["orders_and_shipping.md"]}
+  {"query": "How can I reset my sign-in password?", "expected_evidence": ["account_and_technical_help.md#chunk-000"]},
+  {"query": "What should I do when my home router will not connect?", "expected_evidence": ["account_and_technical_help.md#chunk-000"]},
+  {"query": "What should I provide to support about two successful payments?", "expected_evidence": ["billing_and_refunds.md#chunk-000"]},
+  {"query": "Does this article guarantee when a refund appears?", "expected_evidence": ["billing_and_refunds.md#chunk-000"]},
+  {"query": "Where do I look for the current parcel tracking status?", "expected_evidence": ["orders_and_shipping.md#chunk-000"]},
+  {"query": "Can I update my delivery address after the carrier has it?", "expected_evidence": ["orders_and_shipping.md#chunk-001"]}
 ]

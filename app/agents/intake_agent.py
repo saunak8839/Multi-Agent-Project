@@ -12,17 +12,34 @@ def intake_agent(state: SupportState) -> dict:
     previous_intent = state.get("intent")
     previous_entities = state.get("entities", {})
 
+    security_terms = (
+        "security breach", "data breach", "hacked", "account compromised",
+        "compromised account", "unauthorized access", "unauthorised access",
+        "someone accessed", "got into my account", "stolen password", "stolen credentials", "phishing",
+        "suspicious login", "account takeover",
+    )
+    urgent_terms = ("urgent", "asap", "right now", "immediately", "emergency", "critical")
+    security_risk = any(term in text for term in security_terms)
+    urgency = "high" if security_risk or any(term in text for term in urgent_terms) else "normal"
+
     billing_terms = (
-        "bill", "billing", "charged", "charge", "payment", "invoice",
-        "duplicate charge", "double charged", "refund me", "refund for",
-        "request a refund", "refund status", "where is my refund",
+        "bill", "billing", "charged", "charge", "payment", "invoice", "refund",
+        "duplicate charge", "double charged", "order payment",
     )
     faq_terms = (
         "policy", "how do i", "how can i", "what is", "what are",
-        "where can i", "when can i", "shipping", "warranty", "return policy",
+        "where can i", "where do i", "when can i", "shipping", "warranty",
+        "return policy", "tracking", "parcel", "delivery", "address",
     )
-    technical_terms = ("error", "broken", "doesn't work", "does not work", "not working", "can't", "cannot", "internet", "login", "crash")
-    if any(term in text for term in billing_terms):
+    technical_terms = (
+        "error", "broken", "doesn't work", "does not work", "not working", "internet",
+        "wifi", "wi-fi", "router", "login", "log in", "sign in", "login issue",
+        "can't connect", "cannot connect",
+        "crash", "disconnect", "keeps dropping", "won't load", "not loading",
+    )
+    if security_risk or urgency == "high":
+        intent = "escalation"
+    elif any(term in text for term in billing_terms):
         intent = "billing"
     elif any(term in text for term in technical_terms):
         intent = "technical"
@@ -37,7 +54,6 @@ def intake_agent(state: SupportState) -> dict:
     if intent == "faq" and previous_intent in {"billing", "technical", "faq"} and is_short_follow_up:
         intent = previous_intent
 
-    urgency = "high" if any(term in text for term in ("urgent", "asap", "right now", "emergency")) else "normal"
     order_match = re.search(r"\b(?:order\s*)?#?(\d{4,})\b", message, re.IGNORECASE)
     entities = {"order_id": order_match.group(1)} if order_match else {}
     if is_short_follow_up and not entities:

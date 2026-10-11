@@ -8,6 +8,7 @@ import inspect
 import time
 from typing import Any, Callable
 from uuid import uuid4
+from langchain_core.runnables import RunnableConfig
 
 
 def new_run_id() -> str:
@@ -68,7 +69,7 @@ def _state_summary(state: dict[str, Any], updates: dict[str, Any] | None = None)
 
 def observe_node(name: str, node: Callable) -> Callable:
     """Wrap a graph node with timing, outcome, and state-summary telemetry."""
-    def wrapped(state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    def wrapped(state: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
         started = time.perf_counter()
         started_at = datetime.now(timezone.utc).isoformat()
         configurable = config.get("configurable", {})
@@ -88,7 +89,7 @@ def observe_node(name: str, node: Callable) -> Callable:
                 "status": "interrupted" if interrupted else "error",
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "error_type": exc.__class__.__name__,
-                "error": str(exc)[:500],
+                "error": "Exception details redacted; correlate with run_id in application logs.",
                 "state": _state_summary(state),
             }
             record_event(event)
@@ -103,23 +104,38 @@ def observe_node(name: str, node: Callable) -> Callable:
             "model_usage": usages,
         }
         record_event(event)
-        return {**updates, "node_traces": [event]}
+        # Traces are kept in JSONL; model usage is emitted here, not checkpointed.
+        return {key: value for key, value in updates.items() if key != "model_usage"}
 
     wrapped.__name__ = getattr(node, "__name__", name)
     return wrapped
 
 
 def observe_decision(name: str, decision: Callable) -> Callable:
-    def wrapped(state: dict[str, Any], config: dict[str, Any] | None = None) -> str:
+    def wrapped(state: dict[str, Any], config: RunnableConfig | None = None) -> str:
         started = time.perf_counter()
-        result = decision(state)
         configurable = (config or {}).get("configurable", {})
+        try:
+            result = decision(state)
+        except Exception as exc:
+            record_event({
+                "event": "decision",
+                "run_id": configurable.get("run_id", state.get("run_id", "unknown")),
+                "thread_id": configurable.get("thread_id", state.get("thread_id", "unknown")),
+                "node": name,
+                "status": "error",
+                "error_type": exc.__class__.__name__,
+                "error": "Exception details redacted; correlate with run_id in application logs.",
+                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            })
+            raise
         record_event({
             "event": "decision",
             "run_id": configurable.get("run_id", state.get("run_id", "unknown")),
             "thread_id": configurable.get("thread_id", state.get("thread_id", "unknown")),
             "node": name,
             "decision": result,
+            "status": "ok",
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
         })
         return result
@@ -137,8 +153,22 @@ def record_tool_event(*, tool: str, run_id: str, thread_id: str, started: float,
         "latency_ms": round((time.perf_counter() - started) * 1000, 2),
     }
     if error:
-        event.update(error_type=error.__class__.__name__, error=str(error)[:500])
+        event.update(
+            error_type=error.__class__.__name__,
+            error="Exception details redacted; correlate with run_id in application logs.",
+        )
     record_event(event)
+
+
+def record_model_usage_event(*, model: str, run_id: str, thread_id: str,
+                            specialist: str, usage: dict[str, Any]) -> None:
+    record_event({
+        "event": "model_usage",
+        "run_id": run_id,
+        "thread_id": thread_id,
+        "node": specialist,
+        "model_usage": [usage],
+    })
 
 
 def summarize_run(events: list[dict[str, Any]], run_id: str) -> dict[str, Any]:
@@ -147,7 +177,8 @@ def summarize_run(events: list[dict[str, Any]], run_id: str) -> dict[str, Any]:
     cost = 0.0
     has_cost = False
     for event in selected:
-        for usage in event.get("model_usage", []):
+        usages = event.get("model_usage", []) if event.get("event") in {"node", "model_usage"} else []
+        for usage in usages:
             tokens_in += int(usage.get("input_tokens", 0))
             tokens_out += int(usage.get("output_tokens", 0))
             if "cost_usd" in usage:
@@ -157,7 +188,8 @@ def summarize_run(events: list[dict[str, Any]], run_id: str) -> dict[str, Any]:
         "events": len(selected),
         "node_failures": sum(e.get("event") == "node" and e.get("status") == "error" for e in selected),
         "tool_failures": sum(e.get("event") == "tool" and e.get("status") == "error" for e in selected),
-        "latency_ms": round(sum(float(e.get("latency_ms", 0)) for e in selected), 2),
+        # These component durations overlap when a tool runs inside a node.
+        "component_time_ms": round(sum(float(e.get("latency_ms", 0)) for e in selected), 2),
         "input_tokens": tokens_in,
         "output_tokens": tokens_out,
         "cost_usd": round(cost, 8) if has_cost else None,
@@ -191,3 +223,11 @@ def retrieval_recall_at_k(retrieved_sources: list[str], expected_sources: set[st
     if not expected_sources:
         return 1.0
     return len(set(retrieved_sources) & expected_sources) / len(expected_sources)
+
+
+def retrieval_mrr_at_k(retrieved_evidence: list[str], expected_evidence: set[str]) -> float:
+    """Reciprocal rank of the first expected chunk, or zero when absent."""
+    for rank, evidence_id in enumerate(retrieved_evidence, start=1):
+        if evidence_id in expected_evidence:
+            return 1.0 / rank
+    return 0.0

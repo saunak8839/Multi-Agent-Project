@@ -1,8 +1,24 @@
 [
   {"message": "What is your return policy?", "expected": "faq"},
   {"message": "How long does standard shipping take?", "expected": "faq"},
+  {"message": "Can I change my delivery address?", "expected": "faq"},
+  {"message": "Where can I find tracking information?", "expected": "faq"},
   {"message": "I was charged twice for order 12345", "expected": "billing"},
   {"message": "Can you check my refund status?", "expected": "billing"},
+  {"message": "I can't see my refund yet", "expected": "billing"},
+  {"message": "My invoice shows a payment I don't recognize", "expected": "billing"},
+  {"message": "The refund is taking longer than expected", "expected": "billing"},
   {"message": "My router internet connection is down", "expected": "technical"},
-  {"message": "The login page shows an error", "expected": "technical"}
+  {"message": "My wifi keeps dropping", "expected": "technical"},
+  {"message": "The login page shows an error", "expected": "technical"},
+  {"message": "The app crashes when I open settings", "expected": "technical"},
+  {"message": "The tracking page gives me an error", "expected": "technical"},
+  {"message": "URGENT: security breach on my account", "expected": "escalation"},
+  {"message": "Someone hacked my account and changed my email", "expected": "escalation"},
+  {"message": "I think someone got into my account", "expected": "escalation"},
+  {"message": "ASAP, my internet is down before a work call", "expected": "escalation"},
+  {"message": "I can't sign in after resetting my password", "expected": "technical"},
+  {"message": "My order has not shipped and I see a duplicate charge", "expected": "billing"},
+  {"message": "Is a pending card authorization a completed charge?", "expected": "billing"},
+  {"message": "How do I reset my password?", "expected": "faq"}
 ]

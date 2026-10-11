@@ -25,8 +25,6 @@ class SupportState(TypedDict, total=False):
     escalation_context: str
     current_tool_calls: list[str]
     conversation_history: Annotated[list[dict[str, Any]], operator.add]
-    node_traces: Annotated[list[dict[str, Any]], operator.add]
-    model_usage: Annotated[list[dict[str, Any]], operator.add]
     tool_calls: Annotated[list[str], operator.add]
     # LangGraph combines each node's step entry with the existing list.
     steps: Annotated[list[str], operator.add]
