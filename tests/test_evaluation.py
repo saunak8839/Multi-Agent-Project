@@ -3,10 +3,22 @@ from pathlib import Path
 
 from app.agents.intake_agent import intake_agent
 from app.graph.routing import route_to_specialist
+from app.rag.chunking import chunk_text
 from app.services.observability import retrieval_mrr_at_k, retrieval_recall_at_k, routing_accuracy
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_retrieval_labels_reference_existing_chunks():
+    evidence = {
+        f"{path.name}#chunk-{index:03d}"
+        for path in (ROOT / "data/knowledge_base").glob("*.md")
+        for index, _ in enumerate(chunk_text(path.read_text()), start=1)
+    }
+    cases = json.loads((ROOT / "data/evaluation/retrieval_cases.json").read_text())
+    for case in cases:
+        assert set(case["expected_evidence"]) <= evidence, case["query"]
 
 
 def test_labeled_routing_cases_meet_expected_accuracy():
