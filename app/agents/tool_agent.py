@@ -4,7 +4,7 @@ import json
 import time
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from app.llm.factory import chat_model_name, get_chat_model
+from app.llm.factory import chat_model_name, get_chat_model, response_text
 
 from app.graph.state import SupportState
 from app.services.observability import model_usage, record_model_usage_event, record_tool_event
@@ -58,7 +58,7 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
             if not response.tool_calls:
                 return {
                     "specialist": specialist,
-                    "findings": str(response.content),
+                    "findings": response_text(response),
                     "tool_calls": called_tools,
                     "current_tool_calls": called_tools,
                     "model_usage": usage_events,

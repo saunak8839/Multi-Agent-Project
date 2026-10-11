@@ -49,3 +49,27 @@ def test_embedding_output_dimensions_are_sent_when_configured(monkeypatch):
     monkeypatch.setenv('EMBEDDING_OUTPUT_DIMENSIONS', '0')
     with pytest.raises(ValueError, match='positive'):
         factory.get_embeddings()
+
+
+def test_native_gemini_adapter(monkeypatch):
+    import langchain_google_genai
+
+    monkeypatch.setenv('CHAT_PROVIDER', 'google_genai')
+    monkeypatch.setenv('CHAT_MODEL', 'gemini-test')
+    monkeypatch.setenv('CHAT_API_KEY', 'test-key')
+    monkeypatch.setattr(langchain_google_genai, 'ChatGoogleGenerativeAI', lambda **kwargs: kwargs)
+    model = factory.get_chat_model()
+    assert model['model'] == 'gemini-test'
+    assert model['google_api_key'] == 'test-key'
+    assert model['vertexai'] is False
+
+
+def test_response_text_excludes_metadata_and_reasoning():
+    from langchain_core.messages import AIMessage
+
+    response = AIMessage(content=[
+        {'type': 'thinking', 'thinking': 'private reasoning'},
+        {'type': 'text', 'text': 'Verified answer.', 'extras': {'signature': 'private-signature'}},
+    ])
+    assert factory.response_text(response) == 'Verified answer.'
+    assert factory.response_text(AIMessage(content='Plain answer.')) == 'Plain answer.'

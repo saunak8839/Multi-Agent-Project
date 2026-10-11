@@ -144,3 +144,5 @@ Embeddings use `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_API_KEY`, and
 The evaluation command loads `.env` automatically, like the CLI and ingestion command.
 
 For embedding endpoints that support the OpenAI `dimensions` parameter, set `EMBEDDING_OUTPUT_DIMENSIONS` to request a specific output size (for example, `1536`). Keep `EMBEDDING_DIMENSIONS` equal to that size. Leave the output-size request blank for endpoints that do not support it; the schema setting alone does not change API output.
+
+For Gemini chat, prefer `CHAT_PROVIDER=google_genai` with `CHAT_MODEL` and `CHAT_API_KEY` set to your Google model ID and API key. This uses the native `langchain-google-genai` adapter and preserves thought signatures across tool calls, which Gemini 3 models require. `CHAT_BASE_URL` is unused by this native adapter. Embeddings can continue to use the OpenAI-compatible Google endpoint independently. Model availability depends on the Google project; use an available model rather than assuming older model IDs are still enabled.

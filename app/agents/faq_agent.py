@@ -2,7 +2,7 @@
 
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from app.llm.factory import chat_model_name, get_chat_model
+from app.llm.factory import chat_model_name, get_chat_model, response_text
 
 from app.graph.state import SupportState
 from app.rag.retriever import retrieve_faq_context
@@ -58,7 +58,7 @@ def faq_agent(state: SupportState) -> dict:
     citations = list(dict.fromkeys(
         f"[{chunk['source']}#chunk-{chunk['chunk_index']:03d}]" for chunk in chunks
     ))
-    answer = str(response.content).strip()
+    answer = response_text(response).strip()
     if not any(citation in answer for citation in citations):
         answer = f"{answer}\n\nSources: {', '.join(citations)}"
 

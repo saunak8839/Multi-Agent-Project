@@ -72,12 +72,13 @@ def ingest_documents(directory: Path = KNOWLEDGE_BASE_DIR) -> int:
             connection.execute("DELETE FROM faq_chunks WHERE source = %s", (source,))
             if not chunks:
                 continue
-            connection.executemany(
-                "INSERT INTO faq_chunks "
-                "(source, chunk_index, content, embedding_model, embedding) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                rows_by_source[source],
-            )
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    "INSERT INTO faq_chunks "
+                    "(source, chunk_index, content, embedding_model, embedding) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    rows_by_source[source],
+                )
 
     return len(all_chunks)
 
