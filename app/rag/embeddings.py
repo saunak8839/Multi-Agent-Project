@@ -1,11 +1,5 @@
-"""Shared embedding model configuration for FAQ ingestion and retrieval."""
+"""Embedding configuration exposed to the retrieval layer."""
 
-from langchain_openai import OpenAIEmbeddings
-
-
-EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIMENSIONS = 1536
-
-
-def get_embeddings() -> OpenAIEmbeddings:
-    return OpenAIEmbeddings(model=EMBEDDING_MODEL)
+from app.llm.factory import (
+    embedding_dimensions, embedding_identity, embedding_model_name, get_embeddings,
+)

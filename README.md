@@ -132,3 +132,13 @@ data/
 ## Next iteration
 
 Further work can connect escalation to a human support system and replace the demo refund ledger with an authorized payment provider integration.
+
+## Provider configuration
+
+Agents obtain LangChain models from `app/llm/factory.py`; provider configuration is centralized there. Existing `OPENAI_API_KEY` and `OPENAI_MODEL` settings still work. Chat and embeddings can use separate providers and keys. Tests can inject fake models by replacing an agent module's `get_chat_model` factory.
+
+To use an OpenAI-compatible chat endpoint, set `CHAT_PROVIDER=openai_compatible`, `CHAT_MODEL`, `CHAT_API_KEY`, and `CHAT_BASE_URL` in `.env`. The endpoint and model must support tool calling and structured output, including LangChain's `include_raw=True` response. Compatibility must be verified with the chosen provider. Native providers with different APIs need an adapter in the factory; agents do not need provider configuration changes.
+
+Embeddings use `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_API_KEY`, and `EMBEDDING_BASE_URL` independently. The compatible adapter sends text inputs rather than OpenAI token IDs. Set `EMBEDDING_DIMENSIONS` to the model's actual output size; this setting validates output and defines the database column, rather than requesting reduced dimensions. Re-ingest documents after switching embedding providers or models. When dimensions change, migrate or recreate the `faq_chunks` table first; ingestion does not automatically alter existing columns. Compatible provider rows use a provider/endpoint/model identity so retrieval does not mix them with existing OpenAI vectors.
+
+The evaluation command loads `.env` automatically, like the CLI and ingestion command.

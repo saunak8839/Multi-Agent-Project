@@ -2,6 +2,7 @@
 
 import json
 import argparse
+from dotenv import load_dotenv
 from pathlib import Path
 
 from app.agents.intake_agent import intake_agent
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
+    load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--routing-only", action="store_true",

@@ -1,11 +1,10 @@
 """Shared LLM tool-calling loop used by specialist nodes."""
 
 import json
-import os
 import time
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
+from app.llm.factory import chat_model_name, get_chat_model
 
 from app.graph.state import SupportState
 from app.services.observability import model_usage, record_model_usage_event, record_tool_event
@@ -15,13 +14,7 @@ MAX_TOOL_ROUNDS = 4
 
 
 def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict:
-    if not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is not set. Add it to .env to use billing or technical tool calling.")
-
-    model = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        temperature=0,
-    ).bind_tools(tools)
+    model = get_chat_model().bind_tools(tools)
     messages = [
         SystemMessage(
             content=(
@@ -60,7 +53,7 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             response = model.invoke(messages)
-            usage_events.append(model_usage(response, os.getenv("OPENAI_MODEL", "gpt-4o-mini")))
+            usage_events.append(model_usage(response, chat_model_name()))
             messages.append(response)
             if not response.tool_calls:
                 return {

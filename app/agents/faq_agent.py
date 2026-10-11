@@ -1,9 +1,8 @@
 """FAQ specialist grounded in retrieved knowledge-base passages."""
 
-import os
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from app.llm.factory import chat_model_name, get_chat_model
 
 from app.graph.state import SupportState
 from app.rag.retriever import retrieve_faq_context
@@ -31,10 +30,7 @@ def faq_agent(state: SupportState) -> dict:
         f"[{chunk['source']}#chunk-{chunk['chunk_index']:03d}]\n{chunk['content']}"
         for chunk in chunks
     )
-    model = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        temperature=0,
-    )
+    model = get_chat_model()
     response = model.invoke(
         [
             SystemMessage(
@@ -70,6 +66,6 @@ def faq_agent(state: SupportState) -> dict:
         "specialist": "faq",
         "findings": answer,
         "retrieved_context": chunks,
-        "model_usage": [model_usage(response, os.getenv("OPENAI_MODEL", "gpt-4o-mini"))],
+        "model_usage": [model_usage(response, chat_model_name())],
         "steps": [f"faq specialist: retrieved {len(chunks)} chunk(s) and drafted a grounded answer"],
     }

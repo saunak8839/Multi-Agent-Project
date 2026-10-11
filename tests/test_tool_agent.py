@@ -42,7 +42,7 @@ def test_tool_agent_dispatches_only_selected_allowlisted_tool(monkeypatch, tmp_p
         FakeResponse([{"name": "lookup", "args": {"record_id": "r-1"}, "id": "call-1", "type": "tool_call"}]),
         FakeResponse(),
     ])
-    monkeypatch.setattr(tool_agent, "ChatOpenAI", lambda **_kwargs: model)
+    monkeypatch.setattr(tool_agent, "get_chat_model", lambda: model)
     result = tool_agent.run_tool_agent(
         {"customer_message": "look up r-1", "run_id": "tool-run", "thread_id": "tool-thread"},
         specialist="billing",
@@ -65,7 +65,7 @@ def test_tool_failure_trace_is_sanitized_and_preserves_prior_model_usage(monkeyp
     model = FakeModel([
         FakeResponse([{"name": "lookup", "args": {}, "id": "call-1", "type": "tool_call"}]),
     ])
-    monkeypatch.setattr(tool_agent, "ChatOpenAI", lambda **_kwargs: model)
+    monkeypatch.setattr(tool_agent, "get_chat_model", lambda: model)
     node = observe_node(
         "billing",
         lambda state: tool_agent.run_tool_agent(state, specialist="billing", tools=[fake_tool]),

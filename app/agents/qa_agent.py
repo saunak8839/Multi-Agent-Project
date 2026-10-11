@@ -1,10 +1,9 @@
 """Review drafted replies for grounding, correctness, tone, and citations."""
 
-import os
 import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from app.llm.factory import chat_model_name, get_chat_model
 from pydantic import BaseModel, Field
 
 from app.graph.state import SupportState
@@ -22,10 +21,7 @@ class QAReview(BaseModel):
 
 def qa_reviewer_agent(state: SupportState) -> dict:
     attempt = state.get("qa_attempts", 0) + 1
-    model = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        temperature=0,
-    ).with_structured_output(QAReview, include_raw=True)
+    model = get_chat_model().with_structured_output(QAReview, include_raw=True)
     evidence = {
         "specialist": state.get("specialist"),
         "specialist_findings": state.get("findings", ""),
@@ -106,7 +102,7 @@ def qa_reviewer_agent(state: SupportState) -> dict:
         "qa_result": result,
         "qa_feedback": "" if passed else feedback,
         "qa_attempts": attempt,
-        "model_usage": [model_usage(review_response["raw"], os.getenv("OPENAI_MODEL", "gpt-4o-mini"))],
+        "model_usage": [model_usage(review_response["raw"], chat_model_name())],
         "steps": [
             f"qa reviewer: {'passed' if passed else 'failed'} on attempt {attempt}"
             + (f" ({len(issues)} issue(s))" if issues else "")
