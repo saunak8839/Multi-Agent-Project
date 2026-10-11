@@ -35,6 +35,10 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
                 )
             )
         ),
+        *[
+            HumanMessage(content=f"Previous {entry['role']} message: {entry['content']}")
+            for entry in state.get("conversation_history", [])[-9:-1]
+        ],
         HumanMessage(
             content=(
                 f"Customer message: {state['customer_message']}\n"
@@ -58,6 +62,7 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
                 "specialist": specialist,
                 "findings": str(response.content),
                 "tool_calls": called_tools,
+                "current_tool_calls": called_tools,
                 "proposed_action": proposed_action,
                 "requires_approval": bool(proposed_action),
                 "steps": [f"{specialist} specialist: completed after {len(called_tools)} tool call(s)"],

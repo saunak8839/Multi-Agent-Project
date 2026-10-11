@@ -21,6 +21,8 @@ class SupportState(TypedDict, total=False):
     approval_decision: dict[str, Any]
     action_result: dict[str, Any]
     escalation_context: str
+    current_tool_calls: list[str]
+    conversation_history: Annotated[list[dict[str, Any]], operator.add]
     tool_calls: Annotated[list[str], operator.add]
     # LangGraph combines each node's step entry with the existing list.
     steps: Annotated[list[str], operator.add]

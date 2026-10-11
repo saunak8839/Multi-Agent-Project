@@ -60,7 +60,9 @@ The workflow allows three QA attempts (the first review plus up to two retries).
 
 If Billing proposes a refund, QA must pass before the graph interrupts and shows the order, amount, and reviewed draft. The CLI asks a human to approve or reject. Approval rechecks the duplicate-payment capacity and records the refund in the local demo refund ledger. Rejection records an escalation summary and executes no refund.
 
-This demo uses LangGraph's in-memory checkpointer and keeps the CLI process open while waiting for the decision. The pending approval is lost if that process exits; a deployed service should use a durable checkpointer. The refund ledger is simulated and does not contact a payment processor.
+## Iteration 6: Persistence and conversation history
+
+The graph uses LangGraph's PostgreSQL checkpointer. Each conversation has a `thread_id`; graph state, pending interrupts, and the user/assistant transcript are saved in PostgreSQL. Reusing the ID continues the same conversation, while `--history` retrieves its transcript. A pending refund approval can be resumed from a new process with `--decision approve` or `--decision reject`. Recent turns are supplied to specialists as context, while FAQ answers remain grounded in retrieved knowledge-base chunks. The refund ledger is simulated and does not contact a payment processor.
 
 ## Set up and run
 
@@ -81,21 +83,32 @@ python -m app.main "I was charged twice for order 12345. Please refund one payme
 python -m app.main "My router internet connection is down"
 ```
 
+The CLI prints each conversation ID. Save it to continue that thread or inspect its transcript:
+
+```bash
+python -m app.main --thread-id <conversation-id> "Can you explain that?"
+python -m app.main --thread-id <conversation-id> --history
+python -m app.main --thread-id <conversation-id> --decision approve --note "Verified by support"
+```
+
+If a refund approval is interrupted, the ID printed before the prompt can be used to resolve it after restarting. The same `DATABASE_URL` must be available, and PostgreSQL must remain running. Checkpointing uses LangGraph's Postgres saver tables, initialized automatically on startup.
+
 Order `12345` has two successful seeded payment records; order `12346` has one. The knowledge base contains sample billing/refund, shipping, and technical guidance. These are demo policies for this project, not real company policies.
 
-`DATABASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` are configured in `.env.example`. All routes use the OpenAI API for QA review; Billing and Technical also use it for specialist work. Billing requires PostgreSQL, and FAQ requires PostgreSQL plus ingested documents for retrieval and embeddings.
+`DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, and `LANGGRAPH_STRICT_MSGPACK` are configured in `.env.example`. All routes use the OpenAI API for QA review; Billing and Technical also use it for specialist work. Billing and durable checkpoints require PostgreSQL, and FAQ requires PostgreSQL plus ingested documents for retrieval and embeddings.
 
 ## State and code map
 
-The shared state carries the original message, intake classification and entities, selected specialist, findings, retrieved context, tool-call names, proposed action, QA results, approval decision, draft reply, and a step trace. Nodes return partial updates; LangGraph merges them into the state.
+The shared state carries the current message, intake classification and entities, selected specialist, findings, retrieved context, tool-call names, proposed action, QA results, approval decision, draft reply, conversation transcript, and a step trace. LangGraph checkpoints that state under the conversation thread ID. Nodes return partial updates; LangGraph merges them into the state.
 
 ```text
 app/
-├── agents/       # Intake, specialists, draft, QA, approval, and action nodes
+├── agents/       # Intake, specialists, draft, QA, approval, action, and transcript nodes
 ├── graph/        # State schema, routing, graph construction
 ├── models/       # PostgreSQL access layer
 ├── rag/          # Chunking, embeddings, ingestion, retrieval
 ├── tools/        # Billing lookups/proposals and simulated log tools
+├── services/     # Durable graph/checkpointer lifecycle
 └── main.py       # Command-line entry point
 data/
 ├── knowledge_base/ # Source Markdown used by FAQ retrieval

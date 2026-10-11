@@ -48,7 +48,14 @@ def faq_agent(state: SupportState) -> dict:
                     )
                 )
             ),
-            HumanMessage(content=f"Customer question:\n{question}\n\nKnowledge-base excerpts:\n{excerpts}"),
+            HumanMessage(content=(
+                "Recent conversation context:\n"
+                + "\n".join(
+                    f"{entry['role']}: {entry['content']}"
+                    for entry in state.get("conversation_history", [])[-9:-1]
+                )
+                + f"\n\nCurrent customer question:\n{question}\n\nKnowledge-base excerpts:\n{excerpts}"
+            )),
         ]
     )
     citations = list(dict.fromkeys(

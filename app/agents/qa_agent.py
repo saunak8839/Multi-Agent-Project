@@ -29,7 +29,7 @@ def qa_reviewer_agent(state: SupportState) -> dict:
         "specialist": state.get("specialist"),
         "specialist_findings": state.get("findings", ""),
         "retrieved_knowledge_chunks": state.get("retrieved_context", []),
-        "tool_calls": state.get("tool_calls", []),
+        "tool_calls": state.get("current_tool_calls", []),
         "proposed_action": state.get("proposed_action"),
     }
     review = model.invoke(

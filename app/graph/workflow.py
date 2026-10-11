@@ -1,8 +1,6 @@
 """Build and compile the support desk graph."""
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.checkpoint.memory import InMemorySaver
-
 from app.agents.action_agent import escalate_rejected_action, execute_approved_action
 from app.agents.approval_agent import approval_gate
 from app.agents.billing_agent import billing_agent
@@ -11,11 +9,12 @@ from app.agents.faq_agent import faq_agent
 from app.agents.intake_agent import intake_agent
 from app.agents.qa_agent import qa_fallback, qa_reviewer_agent
 from app.agents.technical_agent import technical_agent
+from app.agents.conversation_agent import finalize_turn
 from app.graph.routing import route_after_approval, route_after_qa, route_to_specialist
 from app.graph.state import SupportState
 
 
-def build_graph():
+def build_graph(checkpointer):
     graph = StateGraph(SupportState)
     graph.add_node("intake", intake_agent)
     graph.add_node("faq", faq_agent)
@@ -27,6 +26,7 @@ def build_graph():
     graph.add_node("approval_gate", approval_gate)
     graph.add_node("execute_action", execute_approved_action)
     graph.add_node("escalate", escalate_rejected_action)
+    graph.add_node("finalize_turn", finalize_turn)
 
     graph.add_edge(START, "intake")
     graph.add_conditional_edges(
@@ -41,7 +41,7 @@ def build_graph():
         "qa",
         route_after_qa,
         {
-            "pass": END,
+            "pass": "finalize_turn",
             "approval": "approval_gate",
             "faq": "faq",
             "billing": "billing",
@@ -49,15 +49,13 @@ def build_graph():
             "fallback": "qa_fallback",
         },
     )
-    graph.add_edge("qa_fallback", END)
+    graph.add_edge("qa_fallback", "finalize_turn")
     graph.add_conditional_edges(
         "approval_gate",
         route_after_approval,
         {"execute": "execute_action", "escalate": "escalate"},
     )
-    graph.add_edge("execute_action", END)
-    graph.add_edge("escalate", END)
-    return graph.compile(checkpointer=InMemorySaver())
-
-
-support_graph = build_graph()
+    graph.add_edge("execute_action", "finalize_turn")
+    graph.add_edge("escalate", "finalize_turn")
+    graph.add_edge("finalize_turn", END)
+    return graph.compile(checkpointer=checkpointer)
