@@ -28,6 +28,14 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
                     "for human approval and does not issue money. State clearly that it is awaiting approval. "
                     if specialist == "billing" else ""
                 )
+                + (
+                    "Technical logs are historical demo records, not current service status. "
+                    "The log tool is restricted to the device ID supplied by the customer. "
+                    "Describe results as records for that device ID, not proof of customer ownership. "
+                    "Do not claim the current issue is diagnosed or resolved from historical logs. "
+                    "If there are no matching records, say so; do not infer another device or diagnosis. "
+                    if specialist == "technical" else ""
+                )
             )
         ),
         *[
@@ -38,6 +46,10 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
             content=(
                 f"Customer message: {state['customer_message']}\n"
                 f"Intake entities: {state.get('entities', {})}. Do not guess missing identifiers.\n"
+                + (
+                    f"Previous lookups for this turn: {state.get('technical_context', {})}\n"
+                    if specialist == "technical" else ""
+                )
                 + (
                     f"QA reviewer feedback to address on this retry: {state['qa_feedback']}"
                     if state.get("qa_feedback") else ""

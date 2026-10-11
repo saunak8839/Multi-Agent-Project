@@ -42,7 +42,7 @@ LangGraph passes a shared state through nodes. Intake adds the intent, urgency, 
 
 Billing and Technical are LLM specialists with access to allowlisted Python tools. The model requests a tool call using its description and argument schema. Application code dispatches the request to the matching function, appends the result to the model conversation, and lets the specialist continue. A bounded loop limits tool-call rounds.
 
-Billing tools read seeded orders and payment attempts from PostgreSQL. A verified duplicate charge can produce a refund proposal, but proposing does not issue money. The Technical tool searches simulated records in `data/seed/technical_logs.json`.
+Billing tools read seeded orders and payment attempts from PostgreSQL. A verified duplicate charge can produce a refund proposal, but proposing does not issue money. The Technical tool searches simulated records in `data/seed/technical_logs.json`. Technical requests without a device ID receive a clarification question before any log search. Supply an explicit ID such as `device ID router-01`; the application binds all searches to that exact ID, and unknown IDs return no records. Historical records do not establish ownership or current connection status. QA receives the lookup results as evidence alongside specialist findings. A customer-supplied ID is demo lookup scope, not authenticated ownership; a production service must bind scope to the signed-in customer's authorized devices.
 
 ## Iteration 3: FAQ RAG
 

@@ -28,6 +28,7 @@ def qa_reviewer_agent(state: SupportState) -> dict:
         "retrieved_knowledge_chunks": state.get("retrieved_context", []),
         "tool_calls": state.get("current_tool_calls", []),
         "proposed_action": state.get("proposed_action"),
+        "technical_log_evidence": state.get("technical_context", {}),
     }
     review_response = model.invoke(
         [
@@ -42,6 +43,10 @@ def qa_reviewer_agent(state: SupportState) -> dict:
                     "If a refund is pending approval, require the draft to say it is only proposed or awaiting "
                     "approval and must not claim it has been issued. "
                     "When failing, give concise, actionable feedback for the specialist to address."
+                    " For technical replies, check the raw technical_log_evidence rather than trusting "
+                    "specialist summaries alone. Without a customer-provided device ID and matching log "
+                    "records, reject claims of a device-specific diagnosis or resolution. Historical demo "
+                    "logs do not prove customer ownership or the current connection's status."
                 )
             ),
             HumanMessage(

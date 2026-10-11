@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 
 from app.graph.state import SupportState
+from app.tools.technical import extract_device_ids
 
 
 def intake_agent(state: SupportState) -> dict:
@@ -58,6 +59,11 @@ def intake_agent(state: SupportState) -> dict:
     entities = {"order_id": order_match.group(1)} if order_match else {}
     if is_short_follow_up and not entities:
         entities = previous_entities
+    device_ids = extract_device_ids(message)
+    if device_ids:
+        entities = {key: value for key, value in entities.items() if key != "device_id"}
+        if len(device_ids) == 1:
+            entities["device_id"] = next(iter(device_ids))
 
     history_entry = {
         "role": "user",
@@ -74,6 +80,7 @@ def intake_agent(state: SupportState) -> dict:
         "retrieved_context": [],
         "draft_reply": "",
         "current_tool_calls": [],
+        "technical_context": {},
         # Never trust action or approval fields supplied with the initial
         # customer input; only downstream graph nodes may populate them.
         "proposed_action": {},

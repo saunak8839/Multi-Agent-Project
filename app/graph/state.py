@@ -14,6 +14,7 @@ class SupportState(TypedDict, total=False):
     specialist: str
     findings: str
     retrieved_context: list[dict[str, Any]]
+    technical_context: dict[str, Any]
     draft_reply: str
     qa_result: dict[str, Any]
     qa_feedback: str
