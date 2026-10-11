@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 
 from app.graph.state import SupportState
 from app.rag.retriever import retrieve_faq_context
+from app.services.observability import model_usage
 
 
 def faq_agent(state: SupportState) -> dict:
@@ -69,5 +70,6 @@ def faq_agent(state: SupportState) -> dict:
         "specialist": "faq",
         "findings": answer,
         "retrieved_context": chunks,
+        "model_usage": [model_usage(response, os.getenv("OPENAI_MODEL", "gpt-4o-mini"))],
         "steps": [f"faq specialist: retrieved {len(chunks)} chunk(s) and drafted a grounded answer"],
     }

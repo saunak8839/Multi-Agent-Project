@@ -2,11 +2,13 @@
 
 import json
 import os
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from app.graph.state import SupportState
+from app.services.observability import model_usage, record_tool_event
 
 
 MAX_TOOL_ROUNDS = 4
@@ -52,10 +54,12 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
     ]
     tool_by_name = {tool.name: tool for tool in tools}
     called_tools: list[str] = []
+    usage_events: list[dict] = []
     proposed_action = state.get("proposed_action")
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = model.invoke(messages)
+        usage_events.append(model_usage(response, os.getenv("OPENAI_MODEL", "gpt-4o-mini")))
         messages.append(response)
         if not response.tool_calls:
             return {
@@ -63,17 +67,36 @@ def run_tool_agent(state: SupportState, *, specialist: str, tools: list) -> dict
                 "findings": str(response.content),
                 "tool_calls": called_tools,
                 "current_tool_calls": called_tools,
+                "model_usage": usage_events,
                 "proposed_action": proposed_action,
                 "requires_approval": bool(proposed_action),
                 "steps": [f"{specialist} specialist: completed after {len(called_tools)} tool call(s)"],
             }
 
         for tool_call in response.tool_calls:
+            tool_started = time.perf_counter()
             selected_tool = tool_by_name.get(tool_call["name"])
             if selected_tool is None:
                 result = f"Tool {tool_call['name']} is not available to this specialist."
+                record_tool_event(
+                    tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
+                    thread_id=state.get("thread_id", "unknown"), started=tool_started, status="error",
+                    error=ValueError(result),
+                )
             else:
-                result = selected_tool.invoke(tool_call["args"])
+                try:
+                    result = selected_tool.invoke(tool_call["args"])
+                except Exception as exc:
+                    record_tool_event(
+                        tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
+                        thread_id=state.get("thread_id", "unknown"), started=tool_started,
+                        status="error", error=exc,
+                    )
+                    raise
+                record_tool_event(
+                    tool=tool_call["name"], run_id=state.get("run_id", "unknown"),
+                    thread_id=state.get("thread_id", "unknown"), started=tool_started, status="ok",
+                )
                 called_tools.append(tool_call["name"])
                 if tool_call["name"] == "propose_refund":
                     proposal = json.loads(str(result))

@@ -1,0 +1,5 @@
+[
+  {"query": "How do I reset my password?", "expected_sources": ["account_and_technical_help.md"]},
+  {"query": "Why is my refund taking longer?", "expected_sources": ["billing_and_refunds.md"]},
+  {"query": "How long does standard shipping take?", "expected_sources": ["orders_and_shipping.md"]}
+]

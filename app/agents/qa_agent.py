@@ -8,6 +8,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.graph.state import SupportState
+from app.services.observability import model_usage
 
 
 MAX_QA_ATTEMPTS = 3
@@ -24,7 +25,7 @@ def qa_reviewer_agent(state: SupportState) -> dict:
     model = ChatOpenAI(
         model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         temperature=0,
-    ).with_structured_output(QAReview)
+    ).with_structured_output(QAReview, include_raw=True)
     evidence = {
         "specialist": state.get("specialist"),
         "specialist_findings": state.get("findings", ""),
@@ -32,7 +33,7 @@ def qa_reviewer_agent(state: SupportState) -> dict:
         "tool_calls": state.get("current_tool_calls", []),
         "proposed_action": state.get("proposed_action"),
     }
-    review = model.invoke(
+    review_response = model.invoke(
         [
             SystemMessage(
                 content=(
@@ -56,6 +57,7 @@ def qa_reviewer_agent(state: SupportState) -> dict:
         ]
     )
 
+    review = review_response["parsed"]
     issues = list(review.issues)
     if state.get("specialist") == "faq" and state.get("retrieved_context"):
         valid_citations = {
@@ -104,6 +106,7 @@ def qa_reviewer_agent(state: SupportState) -> dict:
         "qa_result": result,
         "qa_feedback": "" if passed else feedback,
         "qa_attempts": attempt,
+        "model_usage": [model_usage(review_response["raw"], os.getenv("OPENAI_MODEL", "gpt-4o-mini"))],
         "steps": [
             f"qa reviewer: {'passed' if passed else 'failed'} on attempt {attempt}"
             + (f" ({len(issues)} issue(s))" if issues else "")

@@ -1,0 +1,8 @@
+[
+  {"message": "What is your return policy?", "expected": "faq"},
+  {"message": "How long does standard shipping take?", "expected": "faq"},
+  {"message": "I was charged twice for order 12345", "expected": "billing"},
+  {"message": "Can you check my refund status?", "expected": "billing"},
+  {"message": "My router internet connection is down", "expected": "technical"},
+  {"message": "The login page shows an error", "expected": "technical"}
+]

@@ -64,6 +64,19 @@ If Billing proposes a refund, QA must pass before the graph interrupts and shows
 
 The graph uses LangGraph's PostgreSQL checkpointer. Each conversation has a `thread_id`; graph state, pending interrupts, and the user/assistant transcript are saved in PostgreSQL. Reusing the ID continues the same conversation, while `--history` retrieves its transcript. A pending refund approval can be resumed from a new process with `--decision approve` or `--decision reject`. Recent turns are supplied to specialists as context, while FAQ answers remain grounded in retrieved knowledge-base chunks. The refund ledger is simulated and does not contact a payment processor.
 
+## Iteration 7: Evaluation and observability
+
+Each graph node, routing decision, and tool call appends a JSON event to `data/observability/traces.jsonl` (or `SUPPORT_TRACE_FILE`). Events include run/thread IDs, status, elapsed milliseconds, failure details, selected route, QA outcome, retrieval sources/distances, tool names, and provider-reported token usage. Customer message and generated reply text are excluded from the trace log. Completed CLI runs show event counts, summed observed latency, token counts, failures, and the trace file location. Set `LLM_INPUT_COST_PER_1M` and `LLM_OUTPUT_COST_PER_1M` to the provider's current USD rates per million tokens to enable cost estimates.
+
+The offline tests cover labeled routing, the graph's specialist-to-QA path, and trace/error/token accounting without OpenAI or PostgreSQL. The live evaluation measures labeled routing accuracy and FAQ source recall against the ingested knowledge base:
+
+```bash
+pytest
+python -m evals.run_evaluation
+```
+
+The live retrieval evaluation requires PostgreSQL, ingested FAQ chunks, and OpenAI embedding credentials. Evaluation examples are in `data/evaluation/`; extend them with representative customer messages and the source documents expected for each query.
+
 ## Set up and run
 
 ```bash
@@ -95,7 +108,7 @@ If a refund approval is interrupted, the ID printed before the prompt can be use
 
 Order `12345` has two successful seeded payment records; order `12346` has one. The knowledge base contains sample billing/refund, shipping, and technical guidance. These are demo policies for this project, not real company policies.
 
-`DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, and `LANGGRAPH_STRICT_MSGPACK` are configured in `.env.example`. All routes use the OpenAI API for QA review; Billing and Technical also use it for specialist work. Billing and durable checkpoints require PostgreSQL, and FAQ requires PostgreSQL plus ingested documents for retrieval and embeddings.
+`DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `LANGGRAPH_STRICT_MSGPACK`, and optional model cost rates are configured in `.env.example`. All routes use the OpenAI API for QA review; Billing and Technical also use it for specialist work. Billing and durable checkpoints require PostgreSQL, and FAQ requires PostgreSQL plus ingested documents for retrieval and embeddings.
 
 ## State and code map
 

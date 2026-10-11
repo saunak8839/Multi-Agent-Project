@@ -1,12 +1,14 @@
 """Run or resume support conversations from the command line."""
 
 import argparse
+import os
 import uuid
 
 from dotenv import load_dotenv
 from langgraph.types import Command
 
 from app.services.conversation import open_support_graph
+from app.services.observability import load_run_events, new_run_id, summarize_run
 
 
 def _print_history(graph, config: dict) -> None:
@@ -19,7 +21,7 @@ def _print_history(graph, config: dict) -> None:
         print(f"[{entry.get('created_at', 'unknown time')}] {entry['role']}: {entry['content']}")
 
 
-def _show_result(result: dict, thread_id: str) -> None:
+def _show_result(result: dict, thread_id: str, run_id: str) -> None:
     print(f"Conversation ID: {thread_id}")
     print(f"Intent: {result.get('intent', 'unknown')}")
     print(f"Route:  {result.get('specialist', 'unknown')}")
@@ -37,6 +39,31 @@ def _show_result(result: dict, thread_id: str) -> None:
         decision = "approved" if result["approval_decision"].get("approved") else "rejected"
         print(f"Human approval: {decision}")
     print(f"\nFinal reply: {result.get('draft_reply', '')}")
+    report = summarize_run(load_run_events(run_id), run_id)
+    print(
+        f"Trace: {report['events']} events, {report['latency_ms']:.1f} ms summed node/tool/decision time, "
+        f"{report['input_tokens']} input + {report['output_tokens']} output tokens"
+    )
+    if report["cost_usd"] is not None:
+        print(f"Estimated model cost: ${report['cost_usd']:.6f}")
+    if report["node_failures"] or report["tool_failures"]:
+        print(f"Failures: {report['node_failures']} node, {report['tool_failures']} tool")
+    print(f"Trace file: {os.getenv('SUPPORT_TRACE_FILE', 'data/observability/traces.jsonl')}")
+
+
+def _invoke(graph, command, config: dict, run_id: str):
+    try:
+        return graph.invoke(command, config)
+    except Exception:
+        failures = [
+            event for event in load_run_events(run_id)
+            if event.get("status") == "error"
+        ]
+        for event in failures:
+            location = event.get("node") or event.get("tool") or "unknown component"
+            print(f"Trace failure at {location}: {event.get('error_type')}: {event.get('error')}")
+        print(f"Inspect full trace at {os.getenv('SUPPORT_TRACE_FILE', 'data/observability/traces.jsonl')}")
+        raise
 
 
 def main() -> None:
@@ -59,7 +86,8 @@ def main() -> None:
         parser.error("provide a customer message, --history, or --decision")
 
     thread_id = args.thread_id or uuid.uuid4().hex
-    config = {"configurable": {"thread_id": thread_id}}
+    run_id = new_run_id()
+    config = {"configurable": {"thread_id": thread_id, "run_id": run_id}}
     with open_support_graph() as support_graph:
         if args.history:
             _print_history(support_graph, config)
@@ -69,8 +97,11 @@ def main() -> None:
             snapshot = support_graph.get_state(config)
             if "approval_gate" not in snapshot.next:
                 parser.error("that conversation has no pending approval to resolve")
-            result = support_graph.invoke(
-                Command(resume={"approved": args.decision == "approve", "note": args.note}), config
+            result = _invoke(
+                support_graph,
+                Command(resume={"approved": args.decision == "approve", "note": args.note}),
+                config,
+                run_id,
             )
         elif args.thread_id:
             snapshot = support_graph.get_state(config)
@@ -78,9 +109,19 @@ def main() -> None:
                 parser.error(
                     "this conversation has a pending graph step; resolve its approval with --decision first"
                 )
-            result = support_graph.invoke({"customer_message": args.message}, config)
+            result = _invoke(
+                support_graph,
+                {"customer_message": args.message, "run_id": run_id, "thread_id": thread_id},
+                config,
+                run_id,
+            )
         else:
-            result = support_graph.invoke({"customer_message": args.message}, config)
+            result = _invoke(
+                support_graph,
+                {"customer_message": args.message, "run_id": run_id, "thread_id": thread_id},
+                config,
+                run_id,
+            )
 
         while result.get("__interrupt__"):
             pending = result["__interrupt__"][0].value
@@ -94,10 +135,10 @@ def main() -> None:
             print("Approval records this in the local demo ledger; it does not contact a payment processor.")
             approved = input("Approve this refund? [y/N]: ").strip().lower() in {"y", "yes"}
             note = input("Decision note (optional): ").strip()
-            result = support_graph.invoke(
-                Command(resume={"approved": approved, "note": note}), config
+            result = _invoke(
+                support_graph, Command(resume={"approved": approved, "note": note}), config, run_id
             )
-        _show_result(result, thread_id)
+        _show_result(result, thread_id, run_id)
 
 
 if __name__ == "__main__":
