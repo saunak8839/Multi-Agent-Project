@@ -19,6 +19,7 @@ def technical_agent(state: SupportState) -> dict:
                 "I haven't checked any device logs yet."
             ),
             "technical_context": {"device_id": None, "lookups": []},
+            "awaiting_device_id": True,
             "current_tool_calls": [],
             "steps": ["technical specialist: requested device ID before log lookup"],
         }
@@ -35,4 +36,8 @@ def technical_agent(state: SupportState) -> dict:
         return result
 
     result = run_tool_agent(state, specialist="technical", tools=[search_technical_logs])
-    return {**result, "technical_context": {"device_id": device_id, "lookups": lookups}}
+    return {
+        **result,
+        "awaiting_device_id": False,
+        "technical_context": {"device_id": device_id, "lookups": lookups},
+    }

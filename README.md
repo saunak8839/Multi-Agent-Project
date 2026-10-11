@@ -146,3 +146,35 @@ The evaluation command loads `.env` automatically, like the CLI and ingestion co
 For embedding endpoints that support the OpenAI `dimensions` parameter, set `EMBEDDING_OUTPUT_DIMENSIONS` to request a specific output size (for example, `1536`). Keep `EMBEDDING_DIMENSIONS` equal to that size. Leave the output-size request blank for endpoints that do not support it; the schema setting alone does not change API output.
 
 For Gemini chat, prefer `CHAT_PROVIDER=google_genai` with `CHAT_MODEL` and `CHAT_API_KEY` set to your Google model ID and API key. This uses the native `langchain-google-genai` adapter and preserves thought signatures across tool calls, which Gemini 3 models require. `CHAT_BASE_URL` is unused by this native adapter. Embeddings can continue to use the OpenAI-compatible Google endpoint independently. Model availability depends on the Google project; use an available model rather than assuming older model IDs are still enabled.
+
+## Local API and browser interface
+
+The FastAPI server serves both the HTTP API and a buildless HTML/CSS/JavaScript frontend. No Node build is needed. After installing `requirements.txt`, starting PostgreSQL, and ingesting the knowledge base:
+
+```bash
+source .venv/bin/activate
+python -m uvicorn app.api:app --host 127.0.0.1 --port 8000
+```
+
+Open **http://127.0.0.1:8000** for chat, **http://127.0.0.1:8000/docs** for interactive API documentation, or `/openapi.json` for the schema. The health endpoint only checks the server process; database and model errors surface when a conversation is used.
+
+The browser supports new conversations, follow-ups, reopening saved threads, a separate support review panel, and resuming interrupted turns. Conversation IDs and short titles are remembered in local browser storage; transcripts remain in PostgreSQL. You can paste an existing CLI conversation UUID using **Open with conversation ID**, or bookmark a browser conversation's URL. Replies are displayed as plain text so model content cannot execute as HTML.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/conversations` | Start a conversation with `{"message": "..."}` |
+| `GET /api/conversations/{id}` | Get transcript, status, QA summary, and pending proposal |
+| `POST /api/conversations/{id}/messages` | Send a follow-up with `{"message": "..."}` |
+| `POST /api/conversations/{id}/retry` | Resume the checkpointed unfinished turn without adding another user message |
+| `POST /api/conversations/{id}/approval` | Resolve a proposal with `{"approved": true, "note": "..."}` |
+| `GET /api/health` | Check process health |
+
+Approval and rejection require a separate `SUPPORT_APPROVAL_KEY` in `.env` and an `Authorization: Bearer <key>` header. Use the **Support view** button to review the proposal and enter that key. The UI never stores the key in local storage. If the environment setting is blank, decisions are disabled. Generate a separate random secret; do not reuse a model-provider key. Approving records the refund in the demo database ledger, not a payment processor.
+
+HTTP `409` means a conversation is busy or has a pending step that must be resolved first. A provider rate limit returns `429` with `Retry-After: 60`. Dependency failures return a redacted `503`; failed execution responses include a conversation ID so the UI can load its checkpoint and offer **Resume conversation**. If failure occurred before any checkpoint existed, resend the initial message after correcting the dependency.
+
+This version is for **local development**: bind to loopback and run one worker. The server restricts hostnames and cross-origin browser writes, but conversation UUIDs are not customer authentication. Approval access uses a shared reviewer key, and mutation locks are process-local. Before network deployment, add customer/session authentication, per-conversation and per-device authorization, individual support roles, and cross-process concurrency control. No hosted deployment is included.
+
+API tests use an in-memory checkpointer and fake specialists, so `python -m pytest -q` needs no running database or provider calls.
+
+The separate **Agent routing** panel shows the latest turn's actual node sequence, selected specialist, QA revision loops, fallback, and approval outcomes. It opens by default and can be toggled independently from the support approval view. Minimal node/outcome records are checkpointed per turn, without entity values, prompts, or raw log data. The panel updates when a request finishes or pauses; it does not stream live node execution. Older checkpoints without routing records show their route after the next message.

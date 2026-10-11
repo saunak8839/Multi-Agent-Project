@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172b28">
+  <title>Support Desk · A little help, right here</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Conversations">
+      <a class="brand" href="/" aria-label="Support Desk home"><span class="brand-mark">s<span>↗</span></span><span>support desk<span class="brand-caption">HERE TO HELP</span></span></a>
+      <button id="new-chat" class="new-chat"><span>＋</span> New conversation <span class="shortcut">↗</span></button>
+      <div class="section-label">YOUR CONVERSATIONS</div>
+      <nav id="conversation-list" aria-label="Saved conversations"></nav>
+      <button id="open-thread" class="quiet-button">↗ Open with conversation ID</button>
+      <div class="sidebar-bottom"><span class="status-dot"></span><span>A thoughtful answer.<br><strong>One conversation at a time.</strong></span></div>
+    </aside>
+
+    <main>
+      <header class="topbar"><div><span class="eyebrow">CUSTOMER SUPPORT</span><h1 id="page-title">Let's work it out.</h1></div><div class="header-actions"><span id="state-pill" class="pill">Ready to help</span><button id="routing-toggle" class="outline-button" aria-expanded="true" aria-controls="routing-panel">Agent routing</button><button id="support-toggle" class="outline-button" aria-expanded="false" aria-controls="support-panel">Support view</button></div></header>
+      <div class="workspace">
+        <section class="chat-area" aria-label="Support conversation">
+          <div id="welcome" class="welcome">
+            <span class="welcome-icon" aria-hidden="true">✳</span>
+            <p class="eyebrow">A GOOD PLACE TO START</p>
+            <h2>What can we<br>help you with?</h2>
+            <p class="welcome-copy">From a payment question to a connection hiccup,<br class="desktop-break"> tell us what's happening. We'll take it from there.</p>
+            <div class="suggestions">
+              <button data-prompt="How can I track my parcel?"><span class="suggestion-icon">↗</span><strong>Find my parcel</strong><span>Tracking & delivery <b>→</b></span></button>
+              <button data-prompt="I was charged twice for order 12345. Please check the payments."><span class="suggestion-icon">◎</span><strong>Check a payment</strong><span>Billing & charges <b>→</b></span></button>
+              <button data-prompt="My router internet connection is down"><span class="suggestion-icon">⌁</span><strong>Get connected</strong><span>Technical help <b>→</b></span></button>
+            </div>
+            <p class="welcome-note">A little context helps. Include an order or device ID if you have one.</p>
+          </div>
+          <div id="messages" class="messages" role="log" aria-label="Messages" aria-live="polite"></div>
+          <div id="working" class="working" hidden><span class="spinner"></span> Looking into your request…</div>
+          <div id="approval-notice" class="notice" hidden><span>◎</span><div><strong>Your refund proposal is awaiting review.</strong><p>A support reviewer must make a decision before it can proceed.</p></div></div>
+          <div id="error-banner" class="error-banner" role="alert" hidden><span id="error-text"></span><button id="dismiss-error" aria-label="Dismiss error">×</button></div>
+          <div id="retry-area" class="retry-area" hidden><p>This conversation has an unfinished turn.</p><button id="retry-turn" class="outline-button">Resume conversation ↗</button></div>
+          <div class="composer-wrap">
+            <form id="message-form" class="composer"><label class="sr-only" for="message-input">Your message</label><textarea id="message-input" placeholder="Tell us what's on your mind…" rows="2" maxlength="8000" required></textarea><div class="composer-footer"><span>Enter to send · Shift + Enter for a new line</span><button id="send-button" type="submit" aria-label="Send message">↑</button></div></form>
+            <p class="composer-note">Please leave out passwords, card details, and verification codes.</p>
+          </div>
+        </section>
+
+        <aside id="routing-panel" class="routing-panel" aria-label="Agent routing">
+          <div class="panel-heading"><span class="eyebrow">BEHIND THE CONVERSATION</span><h2>Agent routing</h2><p>Follow the path from intake to the final reply.</p></div>
+          <div class="routing-branches" aria-label="Specialist routes"><span data-route="faq">FAQ</span><span data-route="billing">Billing</span><span data-route="technical">Technical</span><span data-route="escalation">Escalation</span></div>
+          <p id="routing-summary" class="routing-summary" aria-live="polite">Waiting for a message</p>
+          <div id="routing-empty" class="routing-empty"><span aria-hidden="true">⇢</span><strong>Every request has a path.</strong><p>Intake → Specialist → Draft → QA → Reply</p><p>Send a message to see which agents handled it.</p></div>
+          <ol id="routing-steps" class="routing-steps" aria-label="Latest turn routing"></ol>
+          <p class="routing-note">Shows the latest turn. Updates after each response, interruption, or approval decision.</p>
+        </aside>
+
+        <aside id="support-panel" class="support-panel" aria-label="Support review" hidden>
+          <div class="panel-heading"><span class="eyebrow">SUPPORT WORKSPACE</span><h2>Conversation details</h2><p>Review the outcome and any pending action.</p></div>
+          <dl class="details"><dt>Conversation ID</dt><dd id="detail-id">Not started</dd><dt>Specialist</dt><dd id="detail-route">—</dd><dt>Quality review</dt><dd id="detail-qa">—</dd></dl>
+          <div id="no-approval" class="empty-review">✓<strong>Nothing to approve</strong><p>Refund proposals appear here after quality review.</p></div>
+          <section id="approval-card" hidden><span class="review-label">DECISION REQUIRED</span><h3>Refund proposal</h3><div id="approval-amount" class="refund-amount"></div><p id="approval-order"></p><p class="ledger-note">Approval records a refund in the local demo ledger. No payment processor is contacted.</p><label for="reviewed-draft">Reviewed reply</label><blockquote id="reviewed-draft"></blockquote><form id="approval-form"><label for="support-key">Support key</label><input id="support-key" type="password" autocomplete="off" placeholder="Enter your reviewer key" required><label for="decision-note">Decision note <span>(optional)</span></label><textarea id="decision-note" rows="3" maxlength="2000" placeholder="Add context for support…"></textarea><div class="decision-actions"><button type="submit" name="decision" value="reject" class="outline-button">Reject</button><button type="submit" name="decision" value="approve" class="primary-button">Approve refund</button></div></form></section>
+        </aside>
+      </div>
+      <footer class="page-footer"><span>SUPPORT DESK</span><span>A clearer path to getting things sorted.</span></footer>
+    </main>
+  </div>
+  <dialog id="thread-dialog"><form id="thread-form"><div class="dialog-heading"><h2>Open a conversation</h2><button id="close-dialog" type="button" aria-label="Close">×</button></div><p>Paste a conversation ID from the browser or command line.</p><label for="thread-input">Conversation ID</label><input id="thread-input" required autocomplete="off" placeholder="Paste your conversation ID"><button class="primary-button" type="submit">Open conversation →</button></form></dialog>
+</body>
+</html>

@@ -67,7 +67,7 @@ def _state_summary(state: dict[str, Any], updates: dict[str, Any] | None = None)
     }
 
 
-def observe_node(name: str, node: Callable) -> Callable:
+def observe_node(name: str, node: Callable, *, track_routing: bool = False) -> Callable:
     """Wrap a graph node with timing, outcome, and state-summary telemetry."""
     def wrapped(state: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
         started = time.perf_counter()
@@ -104,6 +104,14 @@ def observe_node(name: str, node: Callable) -> Callable:
             "model_usage": usages,
         }
         record_event(event)
+        if track_routing:
+            path = [] if name == "intake" else list(state.get("routing_path", []))
+            progress = {"node": name, "status": "completed"}
+            if name == "qa":
+                progress["status"] = "passed" if updates.get("qa_result", {}).get("passed") else "failed"
+            elif name == "approval_gate":
+                progress["status"] = "approved" if updates.get("approval_decision", {}).get("approved") else "rejected"
+            updates = {**updates, "routing_path": [*path, progress]}
         # Traces are kept in JSONL; model usage is emitted here, not checkpointed.
         return {key: value for key, value in updates.items() if key != "model_usage"}
 

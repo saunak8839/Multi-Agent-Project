@@ -15,6 +15,7 @@ class SupportState(TypedDict, total=False):
     findings: str
     retrieved_context: list[dict[str, Any]]
     technical_context: dict[str, Any]
+    awaiting_device_id: bool
     draft_reply: str
     qa_result: dict[str, Any]
     qa_feedback: str
@@ -25,6 +26,8 @@ class SupportState(TypedDict, total=False):
     action_result: dict[str, Any]
     escalation_context: str
     current_tool_calls: list[str]
+    # Minimal UI progress for the latest turn; reset at intake, retained across retries.
+    routing_path: list[dict[str, Any]]
     conversation_history: Annotated[list[dict[str, Any]], operator.add]
     tool_calls: Annotated[list[str], operator.add]
     # LangGraph combines each node's step entry with the existing list.

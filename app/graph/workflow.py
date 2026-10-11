@@ -18,18 +18,21 @@ from app.services.observability import observe_decision, observe_node
 
 def build_graph(checkpointer):
     graph = StateGraph(SupportState)
-    graph.add_node("intake", observe_node("intake", intake_agent))
-    graph.add_node("faq", observe_node("faq", faq_agent))
-    graph.add_node("billing", observe_node("billing", billing_agent))
-    graph.add_node("technical", observe_node("technical", technical_agent))
-    graph.add_node("escalation", observe_node("escalation", urgent_escalation_agent))
-    graph.add_node("draft", observe_node("draft", draft_agent))
-    graph.add_node("qa", observe_node("qa", qa_reviewer_agent))
-    graph.add_node("qa_fallback", observe_node("qa_fallback", qa_fallback))
-    graph.add_node("approval_gate", observe_node("approval_gate", approval_gate))
-    graph.add_node("execute_action", observe_node("execute_action", execute_approved_action))
-    graph.add_node("escalate", observe_node("escalate", escalate_rejected_action))
-    graph.add_node("finalize_turn", observe_node("finalize_turn", finalize_turn))
+    def add_node(name, node):
+        graph.add_node(name, observe_node(name, node, track_routing=True))
+
+    add_node("intake", intake_agent)
+    add_node("faq", faq_agent)
+    add_node("billing", billing_agent)
+    add_node("technical", technical_agent)
+    add_node("escalation", urgent_escalation_agent)
+    add_node("draft", draft_agent)
+    add_node("qa", qa_reviewer_agent)
+    add_node("qa_fallback", qa_fallback)
+    add_node("approval_gate", approval_gate)
+    add_node("execute_action", execute_approved_action)
+    add_node("escalate", escalate_rejected_action)
+    add_node("finalize_turn", finalize_turn)
 
     graph.add_edge(START, "intake")
     graph.add_conditional_edges(
