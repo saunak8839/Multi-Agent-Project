@@ -59,9 +59,16 @@ def get_chat_model() -> BaseChatModel:
 
 
 def get_embeddings() -> Embeddings:
+    options = _connection_options("EMBEDDING")
+    requested_dimensions = os.getenv("EMBEDDING_OUTPUT_DIMENSIONS")
+    if requested_dimensions:
+        dimensions = int(requested_dimensions)
+        if dimensions <= 0:
+            raise ValueError("EMBEDDING_OUTPUT_DIMENSIONS must be positive.")
+        options["dimensions"] = dimensions
     return OpenAIEmbeddings(
         model=embedding_model_name(),
         # Compatible APIs may accept text but not OpenAI token IDs.
         check_embedding_ctx_length=(os.getenv("EMBEDDING_PROVIDER", "openai") != "openai_compatible"),
-        **_connection_options("EMBEDDING"),
+        **options,
     )

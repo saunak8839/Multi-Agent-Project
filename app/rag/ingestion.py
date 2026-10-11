@@ -45,7 +45,12 @@ def ingest_documents(directory: Path = KNOWLEDGE_BASE_DIR) -> int:
     embeddings = get_embeddings()
     vectors = embeddings.embed_documents([content for _, _, content in all_chunks])
     if len(vectors) != len(all_chunks) or any(len(vector) != embedding_dimensions() for vector in vectors):
-        raise ValueError("Embedding output does not match EMBEDDING_DIMENSIONS or chunk count.")
+        raise ValueError(
+            f"Expected {len(all_chunks)} embeddings of {embedding_dimensions()} dimensions; "
+            f"received {len(vectors)} embeddings with dimensions {sorted({len(v) for v in vectors})}. "
+            "Set EMBEDDING_OUTPUT_DIMENSIONS if the provider supports requesting a size, "
+            "or update EMBEDDING_DIMENSIONS and migrate the vector column."
+        )
     rows_by_source: dict[str, list[tuple]] = {}
     for (source, index, content), vector in zip(all_chunks, vectors):
         rows_by_source.setdefault(source, []).append(

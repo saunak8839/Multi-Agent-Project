@@ -38,3 +38,14 @@ def test_invalid_provider_and_missing_endpoint_fail_early(monkeypatch):
     monkeypatch.delenv('CHAT_BASE_URL', raising=False)
     with pytest.raises(ValueError, match='CHAT_BASE_URL'):
         factory.get_chat_model()
+
+
+def test_embedding_output_dimensions_are_sent_when_configured(monkeypatch):
+    monkeypatch.setenv('EMBEDDING_PROVIDER', 'openai')
+    monkeypatch.setenv('EMBEDDING_API_KEY', 'test')
+    monkeypatch.setenv('EMBEDDING_OUTPUT_DIMENSIONS', '1536')
+    monkeypatch.setattr(factory, 'OpenAIEmbeddings', lambda **kwargs: kwargs)
+    assert factory.get_embeddings()['dimensions'] == 1536
+    monkeypatch.setenv('EMBEDDING_OUTPUT_DIMENSIONS', '0')
+    with pytest.raises(ValueError, match='positive'):
+        factory.get_embeddings()
