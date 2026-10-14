@@ -7,10 +7,9 @@ from app.llm.factory import chat_model_name, get_chat_model
 from pydantic import BaseModel, Field
 
 from app.graph.state import SupportState
+from app.graph.routing import requires_approval
+from app.services.workflow_compat import evidence_for, reply_for, review_for
 from app.services.observability import model_usage
-
-
-MAX_QA_ATTEMPTS = 3
 
 
 class QAReview(BaseModel):
@@ -20,22 +19,34 @@ class QAReview(BaseModel):
 
 
 def qa_reviewer_agent(state: SupportState) -> dict:
-    attempt = state.get("qa_attempts", 0) + 1
+    attempt = review_for(state)["attempt"] + 1
+    records = evidence_for(state)
+    reply = reply_for(state)
+    # Old billing checkpoints retained summaries, not raw lookup results.
+    if state.get("specialist") == "billing" and "evidence" not in state:
+        return {
+            "qa_result": {
+                "passed": False, "attempt": 1,
+                "issues": ["Legacy billing evidence is missing."],
+                "feedback": "Look up the order and payments again; supply actual tool results for review.",
+            },
+            "response_kind": "generated",
+            "steps": ["qa reviewer: requested fresh billing evidence for legacy checkpoint"],
+        }
     model = get_chat_model().with_structured_output(QAReview, include_raw=True)
     evidence = {
         "specialist": state.get("specialist"),
-        "specialist_findings": state.get("findings", ""),
-        "retrieved_knowledge_chunks": state.get("retrieved_context", []),
-        "tool_calls": state.get("current_tool_calls", []),
+        "records": records,
         "proposed_action": state.get("proposed_action"),
-        "technical_log_evidence": state.get("technical_context", {}),
+        "entities": state.get("entities", {}),
+        "response_kind": state.get("response_kind", "generated"),
     }
     review_response = model.invoke(
         [
             SystemMessage(
                 content=(
                     "You are a strict customer-support quality reviewer. Check that every factual claim in "
-                    "the draft is supported by specialist findings or retrieved knowledge, that the reply "
+                    "the reply is supported by actual tool results or retrieved knowledge, that the reply "
                     "answers the customer's request, follows the evidence and policy, and has an appropriate "
                     "professional tone. For FAQ replies, require a citation that exactly matches a retrieved "
                     "source chunk. Fail drafts with unsupported promises, invented actions, missing required "
@@ -43,8 +54,8 @@ def qa_reviewer_agent(state: SupportState) -> dict:
                     "If a refund is pending approval, require the draft to say it is only proposed or awaiting "
                     "approval and must not claim it has been issued. "
                     "When failing, give concise, actionable feedback for the specialist to address."
-                    " For technical replies, check the raw technical_log_evidence rather than trusting "
-                    "specialist summaries alone. Without a customer-provided device ID and matching log "
+                    " For billing and technical replies, inspect the raw records rather than trusting "
+                    "specialist summaries alone. For technical replies, without a customer-provided device ID and matching log "
                     "records, reject claims of a device-specific diagnosis or resolution. Historical demo "
                     "logs do not prove customer ownership or the current connection's status."
                 )
@@ -52,27 +63,30 @@ def qa_reviewer_agent(state: SupportState) -> dict:
             HumanMessage(
                 content=(
                     f"Customer message:\n{state['customer_message']}\n\n"
-                    f"Evidence:\n{evidence}\n\nDraft reply:\n{state.get('draft_reply', '')}"
+                    f"Recent conversation:\n{state.get('conversation_history', [])[-9:-1]}\n\n"
+                    f"Evidence:\n{evidence}\n\nDraft reply:\n{reply}"
                 )
             ),
         ]
     )
 
-    review = review_response["parsed"]
-    issues = list(review.issues)
-    if state.get("specialist") == "faq" and state.get("retrieved_context"):
+    review = review_response.get("parsed")
+    parsed = isinstance(review, QAReview) and not review_response.get("parsing_error")
+    issues = list(review.issues) if parsed else ["QA output could not be parsed; submit the answer for review again."]
+    chunks = [item["data"] for item in records if item["kind"] == "knowledge"]
+    if state.get("specialist") == "faq" and chunks:
         valid_citations = {
             f"[{chunk['source']}#chunk-{chunk['chunk_index']:03d}]"
-            for chunk in state["retrieved_context"]
+            for chunk in chunks
         }
-        draft_citations = set(re.findall(r"\[[^\]\n]+#chunk-\d{3}\]", state.get("draft_reply", "")))
+        draft_citations = set(re.findall(r"\[[^\]\n]+#chunk-\d{3}\]", reply))
         if not draft_citations or not draft_citations.intersection(valid_citations):
             issues.append("Add a citation that exactly matches a retrieved knowledge source chunk.")
         elif not draft_citations.issubset(valid_citations):
             issues.append("Remove citations that do not match a retrieved knowledge source chunk.")
 
-    if state.get("requires_approval"):
-        draft = state.get("draft_reply", "").lower()
+    if requires_approval(state):
+        draft = reply.lower()
         approval_language = (
             "awaiting approval", "awaiting human approval", "pending approval",
             "pending human approval", "proposed for approval", "requires your approval",
@@ -90,12 +104,12 @@ def qa_reviewer_agent(state: SupportState) -> dict:
         if any(phrase in draft for phrase in premature_claims):
             issues.append("Remove any claim that the refund was executed before human approval.")
 
-    passed = review.passed and not issues
+    passed = parsed and review.passed and not issues
     if not passed and not issues:
         issues.append("Reviewer requested a revision; see the feedback below.")
-    feedback = review.feedback.strip()
-    if issues and not feedback:
-        feedback = "Fix the QA issues: " + "; ".join(issues)
+    feedback = review.feedback.strip() if parsed else ""
+    if issues:
+        feedback = " ".join(filter(None, [feedback, "Fix the QA issues: " + "; ".join(issues)]))
 
     result = {
         "passed": passed,
@@ -105,22 +119,9 @@ def qa_reviewer_agent(state: SupportState) -> dict:
     }
     return {
         "qa_result": result,
-        "qa_feedback": "" if passed else feedback,
-        "qa_attempts": attempt,
-        "model_usage": [model_usage(review_response["raw"], chat_model_name())],
+        "model_usage": [model_usage(review_response.get("raw"), chat_model_name())],
         "steps": [
             f"qa reviewer: {'passed' if passed else 'failed'} on attempt {attempt}"
             + (f" ({len(issues)} issue(s))" if issues else "")
         ],
-    }
-
-
-def qa_fallback(state: SupportState) -> dict:
-    """Replace a repeatedly rejected draft with a safe holding response."""
-    return {
-        "draft_reply": (
-            "Thanks for contacting support. I couldn't verify an answer that meets our quality checks, "
-            "so I’m passing your request to a support specialist for review."
-        ),
-        "steps": ["qa fallback: retry limit reached; replaced draft with safe handoff response"],
     }

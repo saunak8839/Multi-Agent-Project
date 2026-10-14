@@ -7,7 +7,7 @@ from app.graph.state import SupportState
 from app.tools.technical import extract_device_ids
 
 
-def intake_agent(state: SupportState) -> dict:
+def intake(state: SupportState) -> dict:
     message = state["customer_message"]
     text = message.lower()
     previous_intent = state.get("intent")
@@ -90,26 +90,31 @@ def intake_agent(state: SupportState) -> dict:
     }
 
     return {
+        **initialize_turn(),
         "customer_message": message,
         "intent": intent,
         "entities": entities,
         "urgency": urgency,
-        "findings": "",
-        "retrieved_context": [],
-        "draft_reply": "",
-        "current_tool_calls": [],
-        "technical_context": {},
-        "awaiting_device_id": False,
-        # Never trust action or approval fields supplied with the initial
-        # customer input; only downstream graph nodes may populate them.
-        "proposed_action": {},
-        "requires_approval": False,
-        "approval_decision": {},
-        "qa_result": {},
-        "qa_feedback": "",
-        "qa_attempts": 0,
-        "action_result": {},
-        "escalation_context": "",
         "conversation_history": [history_entry],
         "steps": [f"intake: intent={intent}, urgency={urgency}, entities={entities}"],
+    }
+
+
+def initialize_turn() -> dict:
+    """Reset turn-local state after intake reads the previous continuation context."""
+    return {
+        "schema_version": 2,
+        "specialist": "",
+        "reply": "",
+        "evidence": [],
+        "response_kind": "generated",
+        "tool_calls": [],
+        "awaiting_device_id": False,
+        "proposed_action": None,
+        "approval_decision": None,
+        "qa_result": None,
+        "action_result": None,
+        "escalation_context": "",
+        "steps": [],
+        "routing_path": [],
     }

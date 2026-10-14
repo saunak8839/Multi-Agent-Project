@@ -5,7 +5,7 @@ import argparse
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.agents.intake_agent import intake_agent
+from app.graph.intake import intake
 from app.graph.routing import route_to_specialist
 from app.rag.retriever import retrieve_faq_context
 from app.services.observability import retrieval_mrr_at_k, retrieval_recall_at_k, routing_accuracy
@@ -24,7 +24,7 @@ def main() -> None:
     args = parser.parse_args()
     routing_cases = json.loads((ROOT / "data/evaluation/routing_cases.json").read_text())
     predicted = [
-        route_to_specialist(intake_agent({"customer_message": case["message"]}))
+        route_to_specialist(intake({"customer_message": case["message"]}))
         for case in routing_cases
     ]
     expected = [case["expected"] for case in routing_cases]

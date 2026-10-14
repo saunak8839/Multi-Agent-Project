@@ -21,10 +21,10 @@ def test_graph_routes_and_traces_end_to_end_without_external_services(
     monkeypatch.setenv("SUPPORT_TRACE_FILE", str(trace_file))
 
     def specialist(state):
-        return {"specialist": expected_specialist, "findings": f"Verified {expected_specialist} result."}
+        return {"specialist": expected_specialist, "reply": f"Verified {expected_specialist} result."}
 
     def pass_qa(_state):
-        return {"qa_result": {"passed": True, "issues": [], "feedback": ""}, "qa_attempts": 1}
+        return {"qa_result": {"passed": True, "issues": [], "feedback": "", "attempt": 1}}
 
     for name in ("faq_agent", "billing_agent", "technical_agent"):
         monkeypatch.setattr(workflow, name, specialist)
@@ -42,10 +42,10 @@ def test_graph_routes_and_traces_end_to_end_without_external_services(
     assert result["conversation_history"][-1]["role"] == "assistant"
     assert "node_traces" not in result
     assert "model_usage" not in result
-    assert result["draft_reply"].startswith("Thanks for contacting support.")
+    assert result["reply"] == f"Verified {expected_specialist} result."
     events = [json.loads(line) for line in trace_file.read_text().splitlines()]
     completed_nodes = {event["node"] for event in events if event["event"] == "node"}
-    assert {"intake", expected_specialist, "draft", "qa", "finalize_turn"} <= completed_nodes
+    assert {"intake", expected_specialist, "qa", "finalize_turn"} <= completed_nodes
     assert any(
         event.get("event") == "decision" and event.get("decision") == expected_specialist
         for event in events

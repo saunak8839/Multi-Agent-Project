@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.agents import technical_agent as technical
-from app.agents.intake_agent import intake_agent
+from app.graph.intake import intake as intake_agent
 from app.tools.technical import search_technical_logs
 
 
@@ -25,28 +25,31 @@ def test_missing_device_asks_for_identifier_without_model_or_log_lookup(monkeypa
     def forbidden(*args, **kwargs):
         pytest.fail('Technical model or lookup called without device ID')
 
-    monkeypatch.setattr(technical, 'run_tool_agent', forbidden)
+    monkeypatch.setattr(technical, 'run_tool_loop', forbidden)
     monkeypatch.setattr(technical, 'lookup_logs', forbidden)
     result = technical.technical_agent(intake_agent({'customer_message': 'My router internet is down'}))
-    assert 'provide your device ID' in result['findings']
-    assert result['current_tool_calls'] == []
-    assert result['technical_context'] == {'device_id': None, 'lookups': []}
+    assert 'provide your device ID' in result['reply']
+    assert result['tool_calls'] == []
+    assert result['evidence'] == []
 
 
 def test_lookup_device_is_bound_by_application_and_evidence_is_returned(monkeypatch):
-    def fake_agent(state, *, specialist, tools):
+    def fake_agent(state, config=None, *, specialist, tools, instructions, context=""):
         assert specialist == 'technical'
         # Even a model-supplied override cannot change the application-bound ID.
         response = json.loads(tools[0].invoke({'search_term': '', 'device_id': 'web-client'}))
         assert response['device_id'] == 'router-01'
         assert all(record['device_id'] == 'router-01' for record in response['matches'])
-        return {'specialist': 'technical', 'findings': 'Historical records for router-01.'}
+        return {'specialist': 'technical', 'reply': 'Historical records for router-01.', 'evidence': [{
+            'kind': 'tool', 'tool': 'search_technical_logs', 'scope': {'device_id': response['device_id']},
+            'outcome': 'ok', 'data': response,
+        }]}
 
-    monkeypatch.setattr(technical, 'run_tool_agent', fake_agent)
+    monkeypatch.setattr(technical, 'run_tool_loop', fake_agent)
     result = technical.technical_agent(intake_agent({'customer_message': 'My router-01 internet is down'}))
-    evidence = result['technical_context']
-    assert evidence['device_id'] == 'router-01'
-    assert len(evidence['lookups'][0]['matches']) == 2
+    evidence = result['evidence'][0]
+    assert evidence['scope']['device_id'] == 'router-01'
+    assert len(evidence['data']['matches']) == 2
 
 
 def test_device_id_follow_up_and_device_switch():
@@ -60,23 +63,23 @@ def test_device_id_follow_up_and_device_switch():
     assert changed['entities']['device_id'] == 'router-99'
     new_topic = intake_agent({**changed, 'customer_message': 'What are your delivery address change policies for shipping?'})
     assert 'device_id' not in new_topic['entities']
-    assert new_topic['technical_context'] == {}
+    assert new_topic['evidence'] == []
 
 
 def test_ambiguous_device_follow_up_does_not_reuse_previous_id(monkeypatch):
     previous = intake_agent({'customer_message': 'My router-01 internet is down'})
     ambiguous = intake_agent({**previous, 'customer_message': 'router-02 or router-03'})
     assert 'device_id' not in ambiguous['entities']
-    assert 'provide your device ID' in technical.technical_agent(ambiguous)['findings']
+    assert 'provide your device ID' in technical.technical_agent(ambiguous)['reply']
 
 
 def test_qa_retry_preserves_lookup_evidence_only_for_same_device(monkeypatch):
-    monkeypatch.setattr(technical, 'run_tool_agent', lambda *args, **kwargs: {'findings': 'Revised reply'})
-    previous = {'device_id': 'router-01', 'lookups': [{'device_id': 'router-01', 'matches': []}]}
-    state = {'customer_message': 'My router is down', 'entities': {'device_id': 'router-01'}, 'technical_context': previous}
-    assert technical.technical_agent(state)['technical_context'] == previous
+    monkeypatch.setattr(technical, 'run_tool_loop', lambda state, *args, **kwargs: {'reply': 'Revised reply', 'evidence': state['evidence']})
+    previous = [{'kind': 'tool', 'tool': 'search_technical_logs', 'scope': {'device_id': 'router-01'}, 'outcome': 'ok', 'data': {'device_id': 'router-01', 'matches': []}}]
+    state = {'customer_message': 'My router is down', 'entities': {'device_id': 'router-01'}, 'evidence': previous}
+    assert technical.technical_agent(state)['evidence'] == previous
     state['entities'] = {'device_id': 'router-99'}
-    assert technical.technical_agent(state)['technical_context'] == {'device_id': 'router-99', 'lookups': []}
+    assert technical.technical_agent(state)['evidence'] == []
 
 
 @pytest.mark.parametrize('identifier', ['11201', 'abc-123'])
@@ -88,16 +91,16 @@ def test_bare_device_id_after_clarification_is_used_for_scoped_lookup(monkeypatc
     assert follow_up['entities']['device_id'] == identifier
     assert 'order_id' not in follow_up['entities']
 
-    def fake_agent(state, *, specialist, tools):
+    def fake_agent(state, config=None, *, specialist, tools, instructions, context=""):
         response = json.loads(tools[0].invoke({'search_term': ''}))
         assert response['device_id'] == identifier
         assert response['matches'] == []
-        return {'specialist': 'technical', 'findings': 'No matching records found for the supplied device.'}
+        return {'specialist': 'technical', 'reply': 'No matching records found for the supplied device.'}
 
-    monkeypatch.setattr(technical, 'run_tool_agent', fake_agent)
+    monkeypatch.setattr(technical, 'run_tool_loop', fake_agent)
     result = technical.technical_agent(follow_up)
     assert result['awaiting_device_id'] is False
-    assert result['technical_context']['device_id'] == identifier
+    assert follow_up['entities']['device_id'] == identifier
 
 
 def test_existing_clarification_checkpoint_accepts_numeric_device_id():
@@ -127,15 +130,15 @@ def test_checkpointed_conversation_accepts_bare_device_follow_up(monkeypatch, tm
 
     monkeypatch.setenv('SUPPORT_TRACE_FILE', str(tmp_path / 'trace.jsonl'))
     monkeypatch.setattr(workflow, 'qa_reviewer_agent', lambda state: {
-        'qa_result': {'passed': True}, 'qa_attempts': 1,
+        'qa_result': {'passed': True, 'attempt': 1},
     })
     seen = []
 
-    def specialist(state, *, specialist, tools):
+    def specialist(state, config=None, *, specialist, tools, instructions, context=""):
         seen.append(json.loads(tools[0].invoke({'search_term': ''})))
-        return {'specialist': specialist, 'findings': 'No matching records found for device 11201.'}
+        return {'specialist': specialist, 'reply': 'No matching records found for device 11201.'}
 
-    monkeypatch.setattr(technical, 'run_tool_agent', specialist)
+    monkeypatch.setattr(technical, 'run_tool_loop', specialist)
     graph = workflow.build_graph(InMemorySaver())
     config = {'configurable': {'thread_id': 'bare-device-follow-up', 'run_id': 'test-run'}}
     first = graph.invoke({'customer_message': 'My router internet connection is down'}, config)
@@ -146,4 +149,4 @@ def test_checkpointed_conversation_accepts_bare_device_follow_up(monkeypatch, tm
     assert second['entities'] == {'device_id': '11201'}
     assert second['awaiting_device_id'] is False
     assert seen[0]['device_id'] == '11201' and seen[0]['matches'] == []
-    assert 'No matching records' in second['draft_reply']
+    assert 'No matching records' in second['reply']

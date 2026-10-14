@@ -9,6 +9,7 @@ import time
 from typing import Any, Callable
 from uuid import uuid4
 from langchain_core.runnables import RunnableConfig
+from app.services.workflow_compat import evidence_for, review_for, tools_for
 
 
 def new_run_id() -> str:
@@ -49,13 +50,13 @@ def model_usage(response: Any, model_name: str) -> dict[str, Any]:
 
 def _state_summary(state: dict[str, Any], updates: dict[str, Any] | None = None) -> dict[str, Any]:
     current = {**state, **(updates or {})}
-    context = current.get("retrieved_context", [])
-    qa = current.get("qa_result", {})
-    approval = current.get("approval_decision", {})
+    context = [item["data"] for item in evidence_for(current) if item["kind"] == "knowledge"]
+    qa = review_for(current)
+    approval = current.get("approval_decision") or {}
     return {
         "intent": current.get("intent"),
         "specialist": current.get("specialist"),
-        "tool_calls": current.get("current_tool_calls", []),
+        "tool_calls": tools_for(current),
         "retrieval": {
             "count": len(context),
             "sources": [f"{item.get('source')}#chunk-{item.get('chunk_index', 0):03d}" for item in context],
@@ -67,7 +68,7 @@ def _state_summary(state: dict[str, Any], updates: dict[str, Any] | None = None)
     }
 
 
-def observe_node(name: str, node: Callable, *, track_routing: bool = False) -> Callable:
+def observe_node(name: str, node: Callable) -> Callable:
     """Wrap a graph node with timing, outcome, and state-summary telemetry."""
     def wrapped(state: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
         started = time.perf_counter()
@@ -104,16 +105,7 @@ def observe_node(name: str, node: Callable, *, track_routing: bool = False) -> C
             "model_usage": usages,
         }
         record_event(event)
-        if track_routing:
-            path = [] if name == "intake" else list(state.get("routing_path", []))
-            progress = {"node": name, "status": "completed"}
-            if name == "qa":
-                progress["status"] = "passed" if updates.get("qa_result", {}).get("passed") else "failed"
-            elif name == "approval_gate":
-                progress["status"] = "approved" if updates.get("approval_decision", {}).get("approved") else "rejected"
-            updates = {**updates, "routing_path": [*path, progress]}
-        # Traces are kept in JSONL; model usage is emitted here, not checkpointed.
-        return {key: value for key, value in updates.items() if key != "model_usage"}
+        return updates
 
     wrapped.__name__ = getattr(node, "__name__", name)
     return wrapped

@@ -14,20 +14,20 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv('SUPPORT_APPROVAL_KEY', 'reviewer-test-key')
 
     def specialist(state):
-        updates = {'specialist': state['intent'], 'findings': 'Verified support response.'}
+        updates = {'specialist': state['intent'], 'reply': 'Verified support response.'}
         if 'refund' in state['customer_message'].lower():
             updates.update(proposed_action={
                 'action': 'refund', 'proposal_id': 'test-proposal', 'order_id': '12345',
                 'amount_cents': 500, 'currency': 'INR',
-            }, requires_approval=True)
+            })
         return updates
 
     def passing_qa(state):
-        return {'qa_result': {'passed': True}, 'qa_attempts': state.get('qa_attempts', 0) + 1}
+        return {'qa_result': {'passed': True, 'attempt': (state.get('qa_result') or {}).get('attempt', 0) + 1}}
 
     def execute(state):
         assert state['approval_decision']['approved'] is True
-        return {'action_result': {'status': 'issued'}, 'draft_reply': 'Approved demo refund recorded.'}
+        return {'action_result': {'status': 'issued'}, 'reply': 'Approved demo refund recorded.'}
 
     for name in ('faq_agent', 'billing_agent', 'technical_agent'):
         monkeypatch.setattr(workflow, name, specialist)
@@ -56,8 +56,8 @@ def test_create_follow_up_and_retrieve_history(client):
     assert view['status'] == 'ready'
     assert [entry['role'] for entry in view['history']] == ['user', 'assistant']
     assert view['qa_passed'] is True
-    assert [step['node'] for step in view['routing_path']] == ['intake', 'faq', 'draft', 'qa', 'finalize_turn']
-    assert view['routing_path'][3]['status'] == 'passed'
+    assert [step['node'] for step in view['routing_path']] == ['intake', 'faq', 'qa', 'finalize_turn']
+    assert view['routing_path'][2]['status'] == 'passed'
     assert 'technical_context' not in view and 'entities' not in view
     response = client.post(path + '/messages', json={'message': 'Can you explain that?'})
     assert response.status_code == 200
@@ -82,6 +82,7 @@ def test_approval_requires_key_and_pending_action(client, approved):
     path = '/api/conversations/' + view['thread_id']
     assert view['status'] == 'awaiting_approval'
     assert view['pending_approval']['amount_cents'] == 500
+    assert view['pending_approval']['draft_reply'] == 'Verified support response.'
     assert view['routing_path'][-1] == {'node': 'approval_gate', 'status': 'awaiting_approval'}
     assert len(view['history']) == 1  # Pending draft has not been sent as a final reply.
     assert client.post(path + '/messages', json={'message': 'Hello'}).status_code == 409
@@ -117,7 +118,7 @@ def test_rate_limit_error_can_resume_without_duplicate_user_turn(client, monkeyp
         attempts.append(1)
         if len(attempts) == 1:
             raise RateLimitError('secret-provider-key must not appear')
-        return {'qa_result': {'passed': True}, 'qa_attempts': 1}
+        return {'qa_result': {'passed': True, 'attempt': 1}}
 
     monkeypatch.setattr(workflow, 'qa_reviewer_agent', flaky_qa)
     graph = workflow.build_graph(InMemorySaver())
@@ -138,7 +139,7 @@ def test_rate_limit_error_can_resume_without_duplicate_user_turn(client, monkeyp
     resumed = client.post(path + '/retry')
     assert resumed.status_code == 200
     assert resumed.json()['status'] == 'ready'
-    assert [step['node'] for step in resumed.json()['routing_path']] == ['intake', 'faq', 'draft', 'qa', 'finalize_turn']
+    assert [step['node'] for step in resumed.json()['routing_path']] == ['intake', 'faq', 'qa', 'finalize_turn']
     assert [entry['role'] for entry in resumed.json()['history']] == ['user', 'assistant']
     assert client.post(path + '/retry').status_code == 409
 
@@ -164,8 +165,8 @@ def test_local_ui_and_origin_checks(client):
 @pytest.mark.parametrize('failures', [1, 3])
 def test_routing_records_qa_loops_and_fallback_without_private_state(client, monkeypatch, failures):
     def qa(state):
-        attempt = state.get('qa_attempts', 0) + 1
-        return {'qa_result': {'passed': attempt > failures}, 'qa_attempts': attempt}
+        attempt = (state.get('qa_result') or {}).get('attempt', 0) + 1
+        return {'qa_result': {'passed': attempt > failures, 'attempt': attempt}}
 
     monkeypatch.setattr(workflow, 'qa_reviewer_agent', qa)
     graph = workflow.build_graph(InMemorySaver())

@@ -1,4 +1,4 @@
-"""Small read-only PostgreSQL access layer used by billing tools."""
+"""PostgreSQL connection and query helpers shared by tools and retrieval."""
 
 import os
 

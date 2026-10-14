@@ -17,6 +17,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from app.services.conversation import open_support_graph
+from app.services.workflow_compat import reply_for, review_for, tools_for
 
 load_dotenv()
 app = FastAPI(title="Support Desk API", version="0.1.0")
@@ -113,13 +114,13 @@ def view_for(graph, config: dict) -> ConversationView:
         action = state.get("proposed_action", {})
         pending = PendingApproval(
             order_id=action["order_id"], amount_cents=action["amount_cents"],
-            currency=action["currency"].strip(), draft_reply=state.get("draft_reply", ""),
+            currency=action["currency"].strip(), draft_reply=reply_for(state),
         )
     return ConversationView(
         thread_id=config["configurable"]["thread_id"], status=status,
         history=state.get("conversation_history", []), specialist=state.get("specialist"),
-        qa_passed=state.get("qa_result", {}).get("passed"), qa_attempts=state.get("qa_attempts", 0),
-        tools=state.get("current_tool_calls", []), pending_approval=pending,
+        qa_passed=review_for(state).get("passed"), qa_attempts=review_for(state)["attempt"],
+        tools=tools_for(state), pending_approval=pending,
         routing_path=routing_path,
     )
 

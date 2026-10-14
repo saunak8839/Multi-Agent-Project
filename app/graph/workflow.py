@@ -1,34 +1,37 @@
 """Build and compile the support desk graph."""
 
 from langgraph.graph import END, START, StateGraph
-from app.agents.action_agent import escalate_rejected_action, execute_approved_action
-from app.agents.approval_agent import approval_gate
 from app.agents.billing_agent import billing_agent
-from app.agents.draft_agent import draft_agent
-from app.agents.escalation_agent import urgent_escalation_agent
 from app.agents.faq_agent import faq_agent
-from app.agents.intake_agent import intake_agent
-from app.agents.qa_agent import qa_fallback, qa_reviewer_agent
+from app.agents.qa_agent import qa_reviewer_agent
 from app.agents.technical_agent import technical_agent
-from app.agents.conversation_agent import finalize_turn
+from app.graph.intake import intake
+from app.graph.progress import workflow_node
 from app.graph.routing import route_after_approval, route_after_qa, route_to_specialist
 from app.graph.state import SupportState
+from app.graph.steps import (
+    approval_gate, escalate_rejected_action, execute_approved_action,
+    finalize_turn, safe_fallback, urgent_handoff,
+)
 from app.services.observability import observe_decision, observe_node
+from app.services.workflow_compat import legacy_draft
 
 
 def build_graph(checkpointer):
     graph = StateGraph(SupportState)
-    def add_node(name, node):
-        graph.add_node(name, observe_node(name, node, track_routing=True))
 
-    add_node("intake", intake_agent)
+    def add_node(name, node):
+        graph.add_node(name, workflow_node(name, observe_node(name, node)))
+
+    add_node("intake", intake)
     add_node("faq", faq_agent)
     add_node("billing", billing_agent)
     add_node("technical", technical_agent)
-    add_node("escalation", urgent_escalation_agent)
-    add_node("draft", draft_agent)
+    add_node("escalation", urgent_handoff)
+    # Compatibility only: old checkpoints may still have a pending draft task.
+    add_node("draft", legacy_draft)
     add_node("qa", qa_reviewer_agent)
-    add_node("qa_fallback", qa_fallback)
+    add_node("qa_fallback", safe_fallback)
     add_node("approval_gate", approval_gate)
     add_node("execute_action", execute_approved_action)
     add_node("escalate", escalate_rejected_action)
@@ -41,7 +44,7 @@ def build_graph(checkpointer):
         {"faq": "faq", "billing": "billing", "technical": "technical", "escalation": "escalation"},
     )
     for specialist in ("faq", "billing", "technical", "escalation"):
-        graph.add_edge(specialist, "draft")
+        graph.add_edge(specialist, "qa")
     graph.add_edge("draft", "qa")
     graph.add_conditional_edges(
         "qa",

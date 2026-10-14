@@ -3,7 +3,7 @@ import json
 import pytest
 from langchain_core.tools import tool
 
-from app.agents import tool_agent
+from app.services import tool_runner as tool_agent
 from app.services.observability import observe_node
 
 
@@ -43,14 +43,14 @@ def test_tool_agent_dispatches_only_selected_allowlisted_tool(monkeypatch, tmp_p
         FakeResponse(),
     ])
     monkeypatch.setattr(tool_agent, "get_chat_model", lambda: model)
-    result = tool_agent.run_tool_agent(
+    result = tool_agent.run_tool_loop(
         {"customer_message": "look up r-1", "run_id": "tool-run", "thread_id": "tool-thread"},
         specialist="billing",
         tools=[lookup],
     )
     assert calls == ["r-1"]
-    assert result["current_tool_calls"] == ["lookup"]
-    assert result["findings"] == "verified response"
+    assert result["tool_calls"] == ["lookup"]
+    assert result["reply"] == "verified response"
     assert len(result["model_usage"]) == 2
 
 
@@ -68,7 +68,7 @@ def test_tool_failure_trace_is_sanitized_and_preserves_prior_model_usage(monkeyp
     monkeypatch.setattr(tool_agent, "get_chat_model", lambda: model)
     node = observe_node(
         "billing",
-        lambda state: tool_agent.run_tool_agent(state, specialist="billing", tools=[fake_tool]),
+        lambda state: tool_agent.run_tool_loop(state, specialist="billing", tools=[fake_tool]),
     )
     with pytest.raises(ValueError):
         node(
@@ -81,3 +81,34 @@ def test_tool_failure_trace_is_sanitized_and_preserves_prior_model_usage(monkeyp
     assert any(event["event"] == "node" and event["status"] == "error" for event in events)
     assert "r-99" not in trace_path.read_text()
     assert "sensitive customer text" not in trace_path.read_text()
+
+
+def test_billing_agent_preserves_successful_proposal_after_rejected_tool_result(monkeypatch, tmp_path):
+    from app.agents import billing_agent as billing
+
+    monkeypatch.setenv("SUPPORT_TRACE_FILE", str(tmp_path / "trace.jsonl"))
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    proposal = {"status": "proposed", "action": "refund", "proposal_id": "p-1", "order_id": "12345", "currency": "INR", "amount_cents": 100}
+
+    @tool
+    def propose_refund(amount_cents: int) -> str:
+        """Propose a refund."""
+        return json.dumps(proposal if amount_cents == 100 else {"error": "exceeds capacity"})
+
+    class BillingModel(FakeModel):
+        def invoke(self, messages):
+            assert billing.BILLING_INSTRUCTIONS in messages[0].content
+            return super().invoke(messages)
+
+    model = BillingModel([
+        FakeResponse([{"name": "propose_refund", "args": {"amount_cents": 100}, "id": "c1", "type": "tool_call"}]),
+        FakeResponse([{"name": "propose_refund", "args": {"amount_cents": 200}, "id": "c2", "type": "tool_call"}]),
+        FakeResponse(),
+    ])
+    monkeypatch.setattr(tool_agent, "get_chat_model", lambda: model)
+    monkeypatch.setattr(billing, "BILLING_TOOLS", [propose_refund])
+    result = billing.billing_agent({"customer_message": "Please refund my duplicate payment"})
+    assert result["proposed_action"] == proposal
+    from app.graph.routing import requires_approval
+    assert requires_approval(result) is True
+    assert result["tool_calls"] == ["propose_refund", "propose_refund"]

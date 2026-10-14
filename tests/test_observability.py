@@ -13,13 +13,13 @@ from app.services.observability import (
 def test_node_trace_records_latency_and_safe_state_summary(monkeypatch, tmp_path):
     trace_file = tmp_path / "traces.jsonl"
     monkeypatch.setenv("SUPPORT_TRACE_FILE", str(trace_file))
-    node = observe_node("example", lambda state: {"specialist": "faq", "findings": "private reply"})
+    node = observe_node("example", lambda state: {"specialist": "faq", "reply": "private reply"})
     updates = node(
         {"customer_message": "private customer message", "intent": "faq"},
         {"configurable": {"run_id": "run-1", "thread_id": "thread-1"}},
     )
     events = [json.loads(line) for line in trace_file.read_text().splitlines()]
-    assert updates == {"specialist": "faq", "findings": "private reply"}
+    assert updates == {"specialist": "faq", "reply": "private reply"}
     assert events[0]["node"] == "example"
     assert events[0]["status"] == "ok"
     assert events[0]["latency_ms"] >= 0

@@ -5,78 +5,69 @@ A graph-based customer support system that triages incoming messages, routes the
 ## Architecture
 
 ```text
-Customer message
-      ↓
-Intake — classify intent, detect urgency, extract entities
-      ↓
-Conditional router
-   ┌──┼───────────┬──────────────┐
-   ↓  ↓           ↓              ↓
- FAQ Billing   Technical   Urgent/security
-   ↓     ↓          ↓        escalation
-Retrieve  PostgreSQL  Simulated logs
-   └──────┼──────────┴──────────────┘
-          ↓
-       Draft reply
-          ↓
-       QA reviewer
-       ↙       ↘
-     FAIL      PASS
-      ↓          ↓
-  Specialist   Risky action?
-      (retry)    ↙       ↘
-              yes         no
-               ↓           ↓
-          Approval gate   END
-           ↙       ↘
-       Approve    Reject
-          ↓          ↓
-        Execute   Escalate
-          ↓          ↓
-          END        END
+Customer message -> Intake -> FAQ / Billing / Technical -> QA -> Save reply
+                       |                                  |
+                       +-> Urgent guidance ---------------+
+                                                          +-> Revision (up to 3 reviews)
+                                                          +-> Safe fallback -> Save reply
+                                                          +-> Human approval
+                                                               | Approve -> Execute -> Save reply
+                                                               | Reject  -> Rejection reply -> Save reply
 ```
 
-LangGraph passes a shared state through nodes. Intake adds the intent, urgency, and extracted entities. A conditional edge selects FAQ, Billing, or Technical. Specialists add findings, Draft turns those findings into a response, and QA decides whether to accept it or return feedback to the same specialist.
+The graph contains both model-based agents and deterministic workflow operations. A graph node is a step, not necessarily an agent. Specialists produce a customer-ready `reply`, structured `evidence`, and an optional `proposed_action`. QA checks the reply against observed evidence; finalization appends the completed reply to conversation history. There is no separate draft stage or automatic greeting prefix.
 
-## Iteration 2: Tool calling
+| Component | Responsibility |
+| --- | --- |
+| Intake | Deterministic classification, entity extraction, and current-turn initialization |
+| FAQ agent | Retrieve knowledge passages and answer from those passages |
+| Billing agent | Select billing tools, interpret results, and handle refund proposals |
+| Technical agent | Investigate historical logs scoped to the supplied device ID |
+| QA reviewer | Review the reply and raw evidence; provide complete revision feedback |
+| Approval gate | Pause durably for an explicit human decision |
+| Action executor | Recheck and record an approved demo refund |
+| Handoff/fallback | Provide accurate guidance when human review is needed |
+| Finalization | Save one completed assistant response |
 
-Billing and Technical are LLM specialists with access to allowlisted Python tools. The model requests a tool call using its description and argument schema. Application code dispatches the request to the matching function, appends the result to the model conversation, and lets the specialist continue. A bounded loop limits tool-call rounds.
+Deterministic operations live in `app/graph/intake.py` and `app/graph/steps.py`. The shared model/tool loop lives in `app/services/tool_runner.py`; specialist instructions and proposal interpretation stay in the specialist modules. Database operations remain in `app/tools/`.
 
-Billing tools read seeded orders and payment attempts from PostgreSQL. A verified duplicate charge can produce a refund proposal, but proposing does not issue money. The Technical tool searches simulated records in `data/seed/technical_logs.json`. Technical requests without a device ID receive a clarification question before any log search. Supply an explicit ID such as `device ID router-01`; the application binds all searches to that exact ID, and unknown IDs return no records. Historical records do not establish ownership or current connection status. QA receives the lookup results as evidence alongside specialist findings. A customer-supplied ID is demo lookup scope, not authenticated ownership; a production service must bind scope to the signed-in customer's authorized devices.
+## Evidence, tools, and knowledge
 
-## Iteration 3: FAQ RAG
+Billing tools read seeded orders/payment attempts from PostgreSQL. They can propose a verified duplicate-charge refund for human approval; proposing does not issue money. Tool results are stored as tagged evidence with the tool name, effective scope, outcome, and returned data. QA receives actual payment/order results rather than only the billing model's summary. Business-error results remain distinguishable from successful lookups.
 
-Markdown documents in `data/knowledge_base/` are split into overlapping chunks, embedded with OpenAI's `text-embedding-3-small`, and stored in PostgreSQL with pgvector. For an FAQ question, the agent embeds the query, retrieves the closest chunks by cosine distance, and gives those excerpts to the model. The model is instructed to answer only from the retrieved text. If no chunk is sufficiently relevant, the agent abstains. Answers include references in the form `[source-file.md#chunk-001]`.
+Technical lookups search `data/seed/technical_logs.json`. Without a device ID, the technical agent requests clarification before any model or log lookup. The application binds the tool to the supplied ID; model arguments cannot override it. Historical records do not establish ownership or current service status. A production service must bind lookup scope to the authenticated customer's authorized devices and orders.
 
-The ingester replaces chunks for a document when it is rerun. Run it again after adding or editing knowledge-base Markdown files.
+Only FAQ currently retrieves knowledge-base articles. Markdown in `data/knowledge_base/` is chunked, embedded, and stored with pgvector. FAQ retrieves passages, drops those beyond the configured-in-code distance threshold, and abstains when none are sufficiently relevant. Answers currently include internal `[source-file.md#chunk-001]` citations. Re-run ingestion after changing articles. QA revisions reuse the observed passages for the turn.
 
-## Iteration 4: QA and feedback loops
+## Review, approval, and persistence
 
-After each draft, a structured QA reviewer checks grounding, factual consistency with specialist evidence, completeness, tone, and FAQ citations. A passing response goes to the end of the graph. A failed response sends actionable feedback to the same specialist, which runs again before a fresh draft and review.
+Generated replies can be revised up to three total QA attempts. Reviewer feedback includes both model issues and application checks. Malformed structured QA output consumes a review attempt; provider failures retain the interrupted-execution recovery path. Fixed clarification, abstention, and urgent-guidance responses fall back immediately if rejected rather than repeating identical work. Fallback indicates that human review is needed; it does not claim an external support ticket was created.
 
-The workflow allows three QA attempts (the first review plus up to two retries). If the draft still fails, the graph replaces it with a safe handoff response rather than returning a repeatedly rejected draft. The command-line output shows the review status, issues, and attempt count.
+A valid refund proposal goes to `approval_gate` only after QA passes. Approval rechecks duplicate-payment capacity under an order lock and records the refund in the local demo ledger. Proposal IDs make execution idempotent. Rejection records a response and executes no refund. No payment processor is contacted. Business schema migrations and independent refund-history features remain separate follow-up work; refund table creation still occurs in the billing tools.
 
-## Iteration 5: Approval gate
+PostgreSQL checkpoints retain conversation history, current-turn data, and pending steps under a `thread_id`. Intake reads continuation context before resetting the reply, evidence, proposal, review, results, tools, and progress for the new turn. Evidence survives revisions within a turn. Public API names remain compatible, including mapping internal `reply` to `pending_approval.draft_reply`.
 
-If Billing proposes a refund, QA must pass before the graph interrupts and shows the order, amount, and reviewed draft. The CLI asks a human to approve or reject. Approval rechecks the duplicate-payment capacity and records the refund in the local demo refund ledger. Rejection records an escalation summary and executes no refund.
+Pre-refactor checkpoints are supported through temporary legacy-field reads and a compatibility-only `draft` node. No new turn routes through it. A legacy billing QA task missing raw evidence requests a fresh investigation. Retire this compatibility layer only after old pending turns are handled; do not clear the database to upgrade. Implementation and migration details are in [docs/implementation-plan.md](docs/implementation-plan.md).
 
-## Iteration 6: Persistence and conversation history
+## Evaluation and observability
 
-The graph uses LangGraph's PostgreSQL checkpointer. Each conversation has a `thread_id`; graph state, pending interrupts, and the user/assistant transcript are saved in PostgreSQL. Reusing the ID continues the same conversation, while `--history` retrieves its transcript. A pending refund approval can be resumed from a new process with `--decision approve` or `--decision reject`. Recent turns are supplied to specialists as context, while FAQ answers remain grounded in retrieved knowledge-base chunks. The refund ledger is simulated and does not contact a payment processor.
-
-## Iteration 7: Evaluation and observability
-
-Each graph node, routing decision, and tool call appends a JSON event to `data/observability/traces.jsonl` (or `SUPPORT_TRACE_FILE`). Events include run/thread IDs, status, elapsed milliseconds, redacted failure details, selected route, QA outcome, retrieval chunks/distances, tool names, and provider-reported token usage. Customer message and generated reply text are excluded from the trace log. Traces stay outside checkpointed conversation state so they do not grow with each follow-up. The CLI reports accumulated component time separately from the current process wall time: component durations overlap when tools run inside nodes. Set `LLM_INPUT_COST_PER_1M` and `LLM_OUTPUT_COST_PER_1M` to the provider's current USD rates per million tokens to enable cost estimates.
-
-The offline tests cover labeled routing, specialist-to-QA paths, approval interruption and resumption, QA retry bounds, tool dispatch, refund idempotency, and trace/error/token accounting without OpenAI or PostgreSQL. The deterministic data evaluation measures route accuracy on a 22-case labeled set. The live retrieval evaluation measures chunk-evidence recall and reciprocal rank (MRR) at four against the ingested knowledge base. Chunk-level labels distinguish retrieval quality even though the corpus has only three source documents:
+Node, decision, and tool telemetry is written as JSONL to `data/observability/traces.jsonl` or `SUPPORT_TRACE_FILE`. Customer messages, replies, and raw lookup records are excluded. Routing progress is maintained independently of telemetry. Resumed tool calls use the current invocation's run/thread IDs. Model usage stays outside durable graph state. CLI reports overlapping accumulated component time separately from process wall time; optional `LLM_INPUT_COST_PER_1M` and `LLM_OUTPUT_COST_PER_1M` enable cost estimates.
 
 ```bash
-pytest
+python -m pytest -q
 python -m evals.run_evaluation --routing-only
 python -m evals.run_evaluation
 ```
 
-The routing score only measures this rule-based classifier against its labeled examples; it does not establish performance on arbitrary customer messages. Retrieval recall measures whether expected evidence chunks occur in the first four results, while MRR rewards a relevant chunk appearing earlier. Evaluation examples are in `data/evaluation/`; add representative and ambiguous cases as routing or corpus behavior changes. The retrieval evaluation requires PostgreSQL, ingested FAQ chunks, and OpenAI embedding credentials. The workflow tests mock model judgments and data access, so they verify application control flow and do not measure real model QA or tool-choice quality.
+Offline tests verify control flow, evidence delivery, review bounds, approval/resumption, compatibility, and tracing with fake providers. Routing evaluation measures the 22 labeled examples; it does not establish general classifier quality. Live retrieval evaluation requires PostgreSQL and embedding credentials and reports evidence recall/MRR at four before FAQ distance filtering.
+
+To also run PostgreSQL migration, restart/replay, and concurrent-refund checks, point `SUPPORT_TEST_DATABASE_URL` at a disposable test database. Each test creates and removes a uniquely named schema; the configured test user needs schema-creation permission. Never use this variable as a substitute for an intentional test database.
+
+```bash
+SUPPORT_TEST_DATABASE_URL=postgresql://test_user@localhost/test_db python -m pytest -q
+```
+
+The same frozen pre-refactor fixtures run against both memory and PostgreSQL savers. PostgreSQL checks are skipped when the test URL is absent. Fake review judgments do not establish live model QA quality.
 
 ## Set up and run
 
@@ -109,24 +100,26 @@ If a refund approval is interrupted, the ID printed before the prompt can be use
 
 Order `12345` has two successful seeded payment records; order `12346` has one. The knowledge base contains sample billing/refund, shipping, and technical guidance. These are demo policies for this project, not real company policies.
 
-`DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `LANGGRAPH_STRICT_MSGPACK`, and optional model cost rates are configured in `.env.example`. All routes use the OpenAI API for QA review; Billing and Technical also use it for specialist work. Billing and durable checkpoints require PostgreSQL, and FAQ requires PostgreSQL plus ingested documents for retrieval and embeddings.
+`DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `LANGGRAPH_STRICT_MSGPACK`, and optional model cost rates are configured in `.env.example`. All routes use the configured chat provider for QA review; Billing and Technical also use it for specialist work. Billing and durable checkpoints require PostgreSQL, and FAQ requires PostgreSQL plus ingested documents for retrieval and embeddings.
 
 ## State and code map
 
-The shared state carries the current message, intake classification and entities, selected specialist, findings, retrieved context, tool-call names, proposed action, QA results, approval decision, draft reply, conversation transcript, and a step trace. LangGraph checkpoints that state under the conversation thread ID. Nodes return partial updates; LangGraph merges them into the state.
+The flat state contract in `app/graph/state.py` uses typed records for evidence, proposals, review results, decisions, and outcomes. Conversation history appends; turn-local tool and readable-step lists are explicitly replaced/reset. Each producer returns local progress entries; the graph progress wrapper combines them for the current turn.
 
 ```text
 app/
-├── agents/       # Intake, specialists, draft, QA, approval, action, and transcript nodes
-├── graph/        # State schema, routing, graph construction
-├── models/       # PostgreSQL access layer
+├── agents/       # FAQ, billing, technical, and QA model-based components
+├── graph/        # Intake, deterministic steps, typed state, routing, and assembly
 ├── rag/          # Chunking, embeddings, ingestion, retrieval
-├── tools/        # Billing lookups/proposals and simulated log tools
-├── services/     # Durable graph/checkpointer lifecycle
-└── main.py       # Command-line entry point
+├── tools/        # Billing database operations and scoped simulated log lookup
+├── models/       # PostgreSQL access layer
+├── services/     # Shared tool runner, persistence, telemetry, legacy compatibility
+├── web/          # Buildless browser interface
+├── api.py        # HTTP boundary and compatible public response models
+└── main.py       # CLI entry point
 data/
-├── knowledge_base/ # Source Markdown used by FAQ retrieval
-└── seed/          # PostgreSQL SQL and simulated technical logs
+├── knowledge_base/
+└── seed/
 ```
 
 ## Next iteration

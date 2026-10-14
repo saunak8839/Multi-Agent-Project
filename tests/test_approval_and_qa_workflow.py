@@ -4,27 +4,25 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from app.agents import action_agent
-from app.agents.qa_agent import MAX_QA_ATTEMPTS
+from app.graph import steps as action_agent
+from app.graph.routing import MAX_QA_ATTEMPTS
 from app.graph import workflow
 
 
 def _proposed_refund(_state):
     return {
         "specialist": "billing",
-        "findings": "Verified duplicate payment; refund proposal awaits approval.",
+        "reply": "Verified duplicate payment; refund proposal awaits approval.",
         "proposed_action": {
             "action": "refund", "proposal_id": "proposal-1", "order_id": "12345",
             "amount_cents": 500, "currency": "USD",
         },
-        "requires_approval": True,
     }
 
 
 def _passing_qa(_state):
     return {
         "qa_result": {"passed": True, "issues": [], "feedback": "", "attempt": 1},
-        "qa_attempts": 1,
     }
 
 
@@ -45,7 +43,7 @@ def test_refund_pauses_until_decision_and_follows_approval_branch(
     def execute(state):
         assert state["approval_decision"]["approved"] is True
         executions.append(state["proposed_action"]["proposal_id"])
-        return {"action_result": {"status": "issued"}, "draft_reply": "Approved refund recorded."}
+        return {"action_result": {"status": "issued"}, "reply": "Approved refund recorded."}
 
     graph = _refund_graph(monkeypatch, tmp_path / "traces.jsonl", execute)
     config = {"configurable": {"thread_id": f"approval-{approved}", "run_id": "approval-run"}}
@@ -68,7 +66,7 @@ def test_refund_pauses_until_decision_and_follows_approval_branch(
         assert executions == ["proposal-1"]
     else:
         assert executions == []
-        assert "not approved" in result["draft_reply"]
+        assert "not approved" in result["reply"]
         assert result["escalation_context"]
 
 
@@ -79,15 +77,13 @@ def test_qa_failure_retries_only_to_limit_then_uses_safe_fallback(monkeypatch, t
 
     def specialist(_state):
         specialist_calls.append(1)
-        return {"specialist": "faq", "findings": "Unverified draft evidence."}
+        return {"specialist": "faq", "reply": "Unverified draft evidence."}
 
     def failing_qa(state):
-        attempt = state.get("qa_attempts", 0) + 1
+        attempt = (state.get("qa_result") or {}).get("attempt", 0) + 1
         qa_calls.append(attempt)
         return {
-            "qa_result": {"passed": False, "issues": ["unsupported"], "feedback": "Use verified evidence."},
-            "qa_feedback": "Use verified evidence.",
-            "qa_attempts": attempt,
+            "qa_result": {"passed": False, "issues": ["unsupported"], "feedback": "Use verified evidence.", "attempt": attempt},
         }
 
     monkeypatch.setattr(workflow, "faq_agent", specialist)
@@ -101,7 +97,7 @@ def test_qa_failure_retries_only_to_limit_then_uses_safe_fallback(monkeypatch, t
     assert qa_calls == list(range(1, MAX_QA_ATTEMPTS + 1))
     assert len(specialist_calls) == MAX_QA_ATTEMPTS
     assert "qa fallback" in result["steps"][-2]
-    assert "couldn't verify an answer" in result["draft_reply"]
+    assert "couldn't verify an answer" in result["reply"]
     events = [json.loads(line) for line in (tmp_path / "traces.jsonl").read_text().splitlines()]
     assert sum(event.get("node") == "qa" for event in events) == MAX_QA_ATTEMPTS
 

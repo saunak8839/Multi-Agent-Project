@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.agents.intake_agent import intake_agent
+from app.graph.intake import intake as intake_agent
 from app.graph.routing import route_to_specialist
 from app.rag.chunking import chunk_text
 from app.services.observability import retrieval_mrr_at_k, retrieval_recall_at_k, routing_accuracy

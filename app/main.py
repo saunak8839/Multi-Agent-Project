@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from langgraph.types import Command
 
 from app.services.conversation import open_support_graph
+from app.services.workflow_compat import reply_for, review_for, tools_for
 from app.services.observability import load_run_events, new_run_id, summarize_run
 
 
@@ -29,17 +30,17 @@ def _show_result(result: dict, thread_id: str, run_id: str, wall_clock_ms: float
     print("Path:")
     for step in result.get("steps", []):
         print(f"  - {step}")
-    if result.get("tool_calls"):
-        print(f"Tools called: {', '.join(result['tool_calls'])}")
+    if tools_for(result):
+        print(f"Tools called: {', '.join(tools_for(result))}")
     if result.get("qa_result"):
         status = "passed" if result["qa_result"].get("passed") else "failed"
-        print(f"QA: {status} after {result.get('qa_attempts', 0)} attempt(s)")
+        print(f"QA: {status} after {review_for(result)['attempt']} attempt(s)")
         if result["qa_result"].get("issues"):
             print(f"QA issues: {'; '.join(result['qa_result']['issues'])}")
     if result.get("approval_decision"):
         decision = "approved" if result["approval_decision"].get("approved") else "rejected"
         print(f"Human approval: {decision}")
-    print(f"\nFinal reply: {result.get('draft_reply', '')}")
+    print(f"\nFinal reply: {reply_for(result)}")
     report = summarize_run(load_run_events(run_id), run_id)
     print(
         f"Trace: {report['events']} events, {report['component_time_ms']:.1f} ms accumulated component time, "
